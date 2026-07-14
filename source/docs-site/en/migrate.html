@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migrate from AWS — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Migrate from AWS</h1>
+
+      <p>This page is for teams already running the AWS solution
+      <strong>Dynamic Image Transformation for Amazon CloudFront</strong> (v7, serverless)
+      who want to move to this solution with <strong>zero client-side changes</strong>.
+      The URL API, the signature algorithm and the error contract are identical to AWS
+      (see the <a href="https://github.com/leonli/dynamic-image-transformation-gcp/blob/main/docs/COMPAT_SPEC.md" rel="noopener">compatibility specification</a>) —
+      your apps, mobile clients, CMS templates and already-issued signed URLs keep working.
+      The only thing that changes is where the DNS record points.</p>
+
+      <div class="note">
+        <p>The full, copy-pasteable version of this guide — including the S3 log-replay
+        script and every CLI command — lives in the repository:
+        <a href="https://github.com/leonli/dynamic-image-transformation-gcp/blob/main/docs/MIGRATION.md" rel="noopener"><code>docs/MIGRATION.md</code></a>.
+        This page summarizes the plan, the steps and the best practices.</p>
+      </div>
+
+      <h2 id="overview">Migration at a glance</h2>
+      <p>Both stacks run in parallel during the whole migration; there is no big-bang
+      moment and no maintenance window. Traffic moves by weighted DNS; images flow
+      S3&nbsp;→&nbsp;GCS through an incremental, repeatable transfer job.</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Phase</th><th>What happens</th><th>Client impact</th><th>Typical duration</th></tr>
+        <tr><td>1. Assess</td><td>Inventory the AWS stack: parameters, buckets, traffic, features in use</td><td>none</td><td>1–2 days</td></tr>
+        <tr><td>2. Copy images</td><td>S3 → GCS with Storage Transfer Service (incremental, repeatable)</td><td>none</td><td>hours–days</td></tr>
+        <tr><td>3. Copy the signing secret</td><td>Same HMAC key into Secret Manager → old signed URLs stay valid</td><td>none</td><td>minutes</td></tr>
+        <tr><td>4. Deploy on GCP</td><td>Launch Wizard or Terraform, parameters mapped 1:1</td><td>none</td><td>~30 min</td></tr>
+        <tr><td>5. Validate</td><td>e2e suite + replay of real production URLs</td><td>none</td><td>1–2 days</td></tr>
+        <tr><td>6. Pre-issue the TLS cert</td><td>Certificate Manager DNS authorization — cert ACTIVE <em>before</em> cutover</td><td>none</td><td>~1 hour</td></tr>
+        <tr><td>7. Cut over</td><td>Weighted DNS 10% → 50% → 100%, low TTL, watch error rates</td><td>transparent</td><td>1–7 days</td></tr>
+        <tr><td>8. Roll back (if needed)</td><td>Flip DNS weights back — the AWS stack is still running</td><td>transparent</td><td>minutes</td></tr>
+        <tr><td>9. Decommission</td><td>Delete the CloudFormation stack; retire S3 after a retention window</td><td>none</td><td>after bake</td></tr>
+      </table>
+      </div>
+
+      <h2 id="assess">Step 1 — Assess the AWS deployment</h2>
+      <p>Pull the CloudFormation parameters (<code>aws cloudformation describe-stacks</code>)
+      and the image handler Lambda's environment variables — they map 1:1 onto this
+      solution's Terraform variables. From a day of CloudFront access logs, identify which
+      request types production actually uses: paths starting with base64
+      (<code>/eyJi…</code>) are Default, <code>/fit-in/…</code> and
+      <code>/filters:…</code> are Thumbor, anything else is Custom.</p>
+      <div class="note">
+        <p><strong>Do this on day one:</strong> lower the DNS TTL of your image hostname
+        to 60&nbsp;seconds. TTL changes need one full old-TTL period to propagate, so doing it
+        early makes both cutover and rollback instant, for free.</p>
+      </div>
+
+      <h2 id="mapping">Step 2 — Parameter mapping</h2>
+      <p>The Launch Wizard prompts and Terraform variables are deliberately named after the
+      CloudFormation parameters:</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>AWS CloudFormation parameter</th><th>Terraform variable</th><th>Container env (identical on both clouds)</th></tr>
+        <tr><td><code>SourceBucketsParameter</code></td><td><code>source_buckets</code></td><td><code>SOURCE_BUCKETS</code></td></tr>
+        <tr><td><code>CorsEnabledParameter</code> / <code>CorsOriginParameter</code></td><td><code>cors_enabled</code> / <code>cors_origin</code></td><td><code>CORS_ENABLED</code> / <code>CORS_ORIGIN</code></td></tr>
+        <tr><td><code>AutoWebPParameter</code></td><td><code>auto_webp</code></td><td><code>AUTO_WEBP</code></td></tr>
+        <tr><td><code>EnableSignatureParameter</code></td><td><code>enable_signature</code></td><td><code>ENABLE_SIGNATURE</code></td></tr>
+        <tr><td><code>SecretsManagerSecretParameter</code> / <code>…KeyParameter</code></td><td><code>secret_name</code> / <code>secret_key_name</code></td><td><code>SECRETS_MANAGER</code> / <code>SECRET_KEY</code></td></tr>
+        <tr><td><code>EnableDefaultFallbackImageParameter</code> + bucket/key</td><td><code>enable_default_fallback_image</code>, <code>fallback_image_bucket</code>, <code>fallback_image_key</code></td><td><code>ENABLE_DEFAULT_FALLBACK_IMAGE</code>, <code>DEFAULT_FALLBACK_IMAGE_BUCKET</code>, <code>DEFAULT_FALLBACK_IMAGE_KEY</code></td></tr>
+        <tr><td><code>DeployDemoUIParameter</code></td><td><code>deploy_demo_ui</code></td><td>—</td></tr>
+        <tr><td>Rewrite pattern / substitution (Custom type)</td><td><code>rewrite_match_pattern</code> / <code>rewrite_substitution</code></td><td><code>REWRITE_MATCH_PATTERN</code> / <code>REWRITE_SUBSTITUTION</code></td></tr>
+        <tr><td><code>CloudFrontPriceClassParameter</code></td><td>— (Cloud CDN is global, single price sheet)</td><td>—</td></tr>
+        <tr><td>— (GCP addition)</td><td><code>bucket_map</code></td><td><code>BUCKET_MAP</code></td></tr>
+        <tr><td>— (GCP addition)</td><td><code>compat_aws_limits</code></td><td><code>COMPAT_AWS_LIMITS</code></td></tr>
+      </table>
+      </div>
+      <p><strong><code>BUCKET_MAP</code> is the key migration helper.</strong> If your
+      production URLs embed S3 bucket names (a <code>"bucket"</code> field in Default
+      request JSON, or paths like <code>/my-s3-bucket:photos/cat.jpg</code>), you do not
+      need to re-generate any URLs. Set
+      <code>bucket_map&nbsp;=&nbsp;"my-s3-bucket=my-gcs-bucket"</code> and every request
+      naming the S3 bucket is transparently served from the GCS bucket. Explicit
+      <code>s3:</code> prefixes are accepted and mapped the same way; the
+      <code>SOURCE_BUCKETS</code> allow-list check runs on the mapped name, matching AWS
+      semantics.</p>
+
+      <h2 id="data">Step 3 — Copy the images (S3 → GCS)</h2>
+      <p>Use <a href="https://cloud.google.com/storage-transfer-service" rel="noopener">Storage
+      Transfer Service</a>: managed, parallel, checksummed and — most importantly —
+      <strong>incremental and repeatable</strong>. Run it once for the bulk copy, then
+      re-run (or schedule) it so late writes to S3 keep flowing in until the write path is
+      cut over:</p>
+      <pre><code>gcloud transfer jobs create s3://my-s3-bucket gs://my-gcs-bucket \
+    --source-creds-file=/tmp/aws-creds.json --name=dit-migration-images
+gcloud transfer jobs run dit-migration-images   # incremental re-run, any time</code></pre>
+      <div class="warning">
+        <p><strong>Keys must stay identical.</strong> The solution addresses objects by the
+        exact key in the URL/JSON — do not rename, re-prefix or flatten paths during the
+        copy. If <code>ENABLE_DEFAULT_FALLBACK_IMAGE=Yes</code>, copy the fallback image
+        object too.</p>
+      </div>
+
+      <h2 id="secret">Step 4 — Copy the signing secret</h2>
+      <p>Signatures are <code>HMAC-SHA256(path[?sorted-query])</code> hex digests — the
+      same key produces the same signature on both clouds, so migrating the key means
+      every already-issued signed URL (including long-lived links baked into emails and
+      apps) keeps validating:</p>
+      <pre><code>aws secretsmanager get-secret-value --secret-id &lt;secret&gt; \
+    --query SecretString --output text &gt; /tmp/dit-sig.json
+
+terraform apply -var-file=terraform.tfvars \
+    -var "signature_secret_json=$(cat /tmp/dit-sig.json)"</code></pre>
+      <p>Keep <code>secret_key_name</code> equal to the AWS
+      <code>SecretsManagerKeyParameter</code>. Delete the temp file afterwards and never
+      commit it.</p>
+
+      <h2 id="deploy">Step 5 — Deploy and validate</h2>
+      <p>Deploy with the <a href="deploy.html">Launch Wizard or Terraform</a>, copying your
+      AWS parameter values verbatim. Then validate <em>before any traffic moves</em>:</p>
+      <ul>
+        <li>Run the shipped suites: <code>deployment/run-unit-tests.sh</code> and
+            <code>BASE_URL=http://&lt;lb_ip&gt; deployment/run-e2e-tests.sh</code>.</li>
+        <li><strong>Replay real production URLs</strong> — extract the top-N paths from
+            CloudFront access logs and request each against both stacks, comparing status
+            code, error JSON and <code>Content-Type</code> (these must match exactly).
+            Byte sizes may differ slightly across encoder versions; compare pixels, not
+            bytes. <code>smartCrop</code> crops are equivalent but not byte-identical
+            (Vision vs. Rekognition bounding boxes).</li>
+        <li>Verify a signed URL generated by your <em>existing AWS signing code</em>
+            validates on GCP, and that a tampered one returns
+            <code>403 SignatureDoesNotMatch</code>.</li>
+        <li>Test CDN caching with two <code>GET</code>s (second response carries
+            <code>Age</code>). Cloud CDN does not cache <code>HEAD</code> — don't test
+            with <code>curl&nbsp;-I</code>.</li>
+      </ul>
+
+      <h2 id="cert">Step 6 — Pre-issue the TLS certificate</h2>
+      <p>The classic Google-managed certificate only activates <em>after</em> DNS points at
+      the load balancer — a chicken-and-egg problem for zero-downtime migrations. Solve it
+      with <strong>Certificate Manager DNS authorization</strong>: a one-off CNAME proves
+      domain ownership and the certificate is issued while CloudFront still serves 100% of
+      traffic. Attach the certificate map to the HTTPS proxy created by Terraform (a map
+      takes precedence over the classic certificate), then verify before touching DNS:</p>
+      <pre><code>gcloud certificate-manager dns-authorizations create dit-authz --domain=img.example.com
+gcloud certificate-manager certificates create dit-cert \
+    --domains=img.example.com --dns-authorizations=dit-authz
+gcloud compute target-https-proxies update &lt;prefix&gt;-https-proxy --certificate-map=dit-cert-map
+
+curl -sv --resolve img.example.com:443:&lt;lb_ip&gt; https://img.example.com/&lt;test-path&gt; -o /dev/null</code></pre>
+
+      <h2 id="cutover">Step 7 — Cut over with weighted DNS</h2>
+      <p>With certificates live on both sides, create two weighted records for the same
+      hostname — an <code>A</code> record to the GCP load balancer IP and the existing
+      alias to CloudFront — and shift 10%&nbsp;→&nbsp;50%&nbsp;→&nbsp;100% with a bake
+      period at each step. Keep TTL at 60&nbsp;s throughout. Watch on the GCP side:</p>
+      <pre><code># Load balancer: 4xx/5xx rate (compare against your CloudFront baseline, not zero)
+gcloud logging read 'resource.type="http_load_balancer" httpRequest.status>=400' --freshness=1h
+
+# Cloud Run: application errors
+gcloud logging read 'resource.type="cloud_run_revision" severity>=ERROR' --freshness=1h</code></pre>
+      <p>Also watch the Cloud CDN cache hit ratio — it starts near 0% and climbs toward
+      your CloudFront baseline within hours as the cache warms. Optionally pre-warm by
+      GETting your top-N URLs through the new endpoint before shifting weight. Keep the
+      S3→GCS transfer job running on a schedule during the canary; once at 100%, point the
+      <strong>write path</strong> (CMS, media pipeline) at GCS, run one final transfer to
+      drain stragglers, and stop the job.</p>
+
+      <h2 id="rollback">Rollback plan</h2>
+      <p>Rollback is a DNS weight change, nothing more: set CloudFront back to weight 100
+      (takes effect within one TTL — 60&nbsp;s). The AWS stack was never modified during
+      the migration, so it simply resumes. The only state to reconcile is images written
+      to GCS after the write-path move, and only if you already moved it. Keep this
+      ability until the bake period ends (typically 1–2 weeks at 100%), then decommission:
+      delete the CloudFormation stack and keep S3 read-only for a 30–90 day retention
+      window.</p>
+
+      <h2 id="differences">Behavioral differences to know about</h2>
+      <p>None of these require client changes; they matter for operators and tests:</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Area</th><th>AWS</th><th>GCP (this solution)</th><th>Impact</th></tr>
+        <tr><td>WebP variant caching</td><td>CloudFront caches on the <code>Accept</code> header</td><td>Cloud CDN forbids <code>Accept</code> in cache keys → the service emits <code>Vary: Accept</code></td><td>none for clients; CDN probes will see <code>Vary: Accept</code> when <code>AUTO_WEBP=Yes</code></td></tr>
+        <tr><td><code>HEAD</code> requests</td><td>served from cache</td><td>Cloud CDN caches/serves only <code>GET</code></td><td>use <code>GET</code> in monitoring, not <code>curl -I</code></td></tr>
+        <tr><td>Max response size</td><td>6 MB (Lambda) → <code>413</code></td><td>32 MB (Cloud Run)</td><td>more permissive; <code>COMPAT_AWS_LIMITS=Yes</code> restores the 413</td></tr>
+        <tr><td>Face detection</td><td>Rekognition</td><td>Cloud Vision <code>FACE_DETECTION</code></td><td>equivalent crops, not byte-identical</td></tr>
+        <tr><td>Content moderation</td><td>Rekognition labels</td><td>Vision <code>SAFE_SEARCH_DETECTION</code>, likelihoods → 0–100, label aliases</td><td>same request/response shape</td></tr>
+        <tr><td>Logs &amp; metrics</td><td>CloudWatch</td><td>Cloud Logging / Monitoring</td><td>re-point dashboards and alerts</td></tr>
+        <tr><td>Bucket prefixes in URLs</td><td><code>s3:</code></td><td><code>s3:</code> and <code>gs:</code>, plus <code>BUCKET_MAP</code></td><td>legacy URLs untouched</td></tr>
+      </table>
+      </div>
+
+      <h2 id="best-practices">Best-practices checklist</h2>
+      <ul>
+        <li>Lower DNS TTL to 60&nbsp;s on day one — cutover and rollback become instant.</li>
+        <li>Never regenerate signed URLs — migrate the secret instead.</li>
+        <li>Use Storage Transfer Service on a schedule, not a one-shot copy — the delta between copy and cutover is otherwise your data-loss window.</li>
+        <li>Pre-issue the certificate with DNS authorization — never let cert provisioning gate the cutover.</li>
+        <li>Keep every parameter value identical to AWS on first deploy; improve things <em>after</em> the migration bakes, one variable at a time.</li>
+        <li>Validate with production URLs, not just synthetic tests.</li>
+        <li>Canary with weighted DNS; compare error rates against your CloudFront baseline, not against zero.</li>
+        <li>Don't decommission AWS until the bake period ends — rollback must stay a 60-second operation.</li>
+        <li>Move the read path first, the write path last.</li>
+      </ul>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

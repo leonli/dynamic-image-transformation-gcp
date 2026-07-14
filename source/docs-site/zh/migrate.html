@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>从 AWS 迁移 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>从 AWS 迁移</h1>
+
+      <p>本页面向已在生产环境使用 AWS 解决方案
+      <strong>Dynamic Image Transformation for Amazon CloudFront</strong>(v7 serverless)
+      的团队,帮助你在<strong>客户端零改动</strong>的前提下迁移到本方案。
+      URL API、签名算法、错误契约与 AWS 逐字段一致(见
+      <a href="https://github.com/leonli/dynamic-image-transformation-gcp/blob/main/docs/COMPAT_SPEC.md" rel="noopener">兼容性规格说明</a>)——
+      你的应用、移动端、CMS 模板、已签发的签名 URL 全部原样可用,唯一变化的只是
+      DNS 记录指向哪里。</p>
+
+      <div class="note">
+        <p>本指南的完整版本——包含 S3 日志回放脚本和每一条 CLI 命令、可直接复制
+        执行——在代码仓库中:
+        <a href="https://github.com/leonli/dynamic-image-transformation-gcp/blob/main/docs/MIGRATION_zh.md" rel="noopener"><code>docs/MIGRATION_zh.md</code></a>。
+        本页汇总迁移方案、步骤与最佳实践。</p>
+      </div>
+
+      <h2 id="overview">迁移全景</h2>
+      <p>迁移全程两套栈并行运行,没有"一刀切"时刻,也不需要停机窗口。流量靠加权
+      DNS 逐步转移;图片通过增量、可重复执行的传输任务从 S3 流向 GCS。</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>阶段</th><th>做什么</th><th>客户端影响</th><th>典型耗时</th></tr>
+        <tr><td>1. 评估</td><td>盘点 AWS 栈:参数、桶、流量、实际用到的功能</td><td>无</td><td>1–2 天</td></tr>
+        <tr><td>2. 迁移图片</td><td>S3 → GCS,用 Storage Transfer Service(增量、可重复)</td><td>无</td><td>数小时–数天</td></tr>
+        <tr><td>3. 迁移签名密钥</td><td>同一把 HMAC 密钥进 Secret Manager → 旧签名 URL 继续有效</td><td>无</td><td>几分钟</td></tr>
+        <tr><td>4. 部署 GCP 栈</td><td>Launch Wizard 或 Terraform,参数 1:1 对应</td><td>无</td><td>约 30 分钟</td></tr>
+        <tr><td>5. 验证</td><td>e2e 套件 + 回放真实生产 URL</td><td>无</td><td>1–2 天</td></tr>
+        <tr><td>6. 预签发 TLS 证书</td><td>Certificate Manager DNS 授权——切流<em>之前</em>证书就 ACTIVE</td><td>无</td><td>约 1 小时</td></tr>
+        <tr><td>7. 切流</td><td>加权 DNS 10% → 50% → 100%,低 TTL,盯错误率</td><td>无感知</td><td>1–7 天</td></tr>
+        <tr><td>8. 回滚(如需)</td><td>DNS 权重拨回去——AWS 栈一直在运行</td><td>无感知</td><td>分钟级</td></tr>
+        <tr><td>9. 下线 AWS</td><td>删除 CloudFormation 栈;S3 保留一个观察期后再清</td><td>无</td><td>观察期后</td></tr>
+      </table>
+      </div>
+
+      <h2 id="assess">第 1 步 — 评估现有 AWS 部署</h2>
+      <p>拉取 CloudFormation 参数(<code>aws cloudformation describe-stacks</code>)和
+      图片处理 Lambda 的环境变量——它们与本方案的 Terraform 变量 1:1 对应。再从一天的
+      CloudFront 访问日志里确认生产实际用了哪些请求类型:base64 开头的路径
+      (<code>/eyJi…</code>)是 Default,<code>/fit-in/…</code> 和
+      <code>/filters:…</code> 是 Thumbor,其余是 Custom。</p>
+      <div class="note">
+        <p><strong>第一天就做:</strong>把图片域名的 DNS TTL 降到 60 秒。TTL 变更要等
+        一个旧 TTL 周期才全网生效,提前做,等于免费拿到秒级切流和秒级回滚。</p>
+      </div>
+
+      <h2 id="mapping">第 2 步 — 参数映射</h2>
+      <p>Launch Wizard 的交互提示与 Terraform 变量刻意沿用了 CloudFormation 参数命名:</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>AWS CloudFormation 参数</th><th>Terraform 变量</th><th>容器环境变量(两云一致)</th></tr>
+        <tr><td><code>SourceBucketsParameter</code></td><td><code>source_buckets</code></td><td><code>SOURCE_BUCKETS</code></td></tr>
+        <tr><td><code>CorsEnabledParameter</code> / <code>CorsOriginParameter</code></td><td><code>cors_enabled</code> / <code>cors_origin</code></td><td><code>CORS_ENABLED</code> / <code>CORS_ORIGIN</code></td></tr>
+        <tr><td><code>AutoWebPParameter</code></td><td><code>auto_webp</code></td><td><code>AUTO_WEBP</code></td></tr>
+        <tr><td><code>EnableSignatureParameter</code></td><td><code>enable_signature</code></td><td><code>ENABLE_SIGNATURE</code></td></tr>
+        <tr><td><code>SecretsManagerSecretParameter</code> / <code>…KeyParameter</code></td><td><code>secret_name</code> / <code>secret_key_name</code></td><td><code>SECRETS_MANAGER</code> / <code>SECRET_KEY</code></td></tr>
+        <tr><td><code>EnableDefaultFallbackImageParameter</code> + 桶/key</td><td><code>enable_default_fallback_image</code>、<code>fallback_image_bucket</code>、<code>fallback_image_key</code></td><td><code>ENABLE_DEFAULT_FALLBACK_IMAGE</code>、<code>DEFAULT_FALLBACK_IMAGE_BUCKET</code>、<code>DEFAULT_FALLBACK_IMAGE_KEY</code></td></tr>
+        <tr><td><code>DeployDemoUIParameter</code></td><td><code>deploy_demo_ui</code></td><td>—</td></tr>
+        <tr><td>重写正则 / 替换串(Custom 类型)</td><td><code>rewrite_match_pattern</code> / <code>rewrite_substitution</code></td><td><code>REWRITE_MATCH_PATTERN</code> / <code>REWRITE_SUBSTITUTION</code></td></tr>
+        <tr><td><code>CloudFrontPriceClassParameter</code></td><td>—(Cloud CDN 全球单一价目表)</td><td>—</td></tr>
+        <tr><td>—(GCP 新增)</td><td><code>bucket_map</code></td><td><code>BUCKET_MAP</code></td></tr>
+        <tr><td>—(GCP 新增)</td><td><code>compat_aws_limits</code></td><td><code>COMPAT_AWS_LIMITS</code></td></tr>
+      </table>
+      </div>
+      <p><strong><code>BUCKET_MAP</code> 是迁移的关键辅助。</strong>如果生产 URL 内嵌了
+      S3 桶名(Default 请求 JSON 里的 <code>"bucket"</code> 字段,或形如
+      <code>/my-s3-bucket:photos/cat.jpg</code> 的路径),你不需要重新生成任何 URL。
+      配置 <code>bucket_map&nbsp;=&nbsp;"my-s3-bucket=my-gcs-bucket"</code>,所有指名该
+      S3 桶的请求会被透明地转到对应 GCS 桶。显式 <code>s3:</code> 前缀同样接受并映射;
+      <code>SOURCE_BUCKETS</code> 白名单校验作用在映射后的桶名上,与 AWS 语义一致。</p>
+
+      <h2 id="data">第 3 步 — 复制图片(S3 → GCS)</h2>
+      <p>推荐 <a href="https://cloud.google.com/storage-transfer-service" rel="noopener">Storage
+      Transfer Service</a>:全托管、并行、带校验和,最重要的是<strong>增量、可重复
+      执行</strong>。先跑一次全量,之后重跑(或调度),把切流前写入 S3 的新图持续同步:</p>
+      <pre><code>gcloud transfer jobs create s3://my-s3-bucket gs://my-gcs-bucket \
+    --source-creds-file=/tmp/aws-creds.json --name=dit-migration-images
+gcloud transfer jobs run dit-migration-images   # 随时增量重跑</code></pre>
+      <div class="warning">
+        <p><strong>对象 key 必须保持一致。</strong>方案按 URL/JSON 中的精确 key 取对象
+        ——复制过程中不要改名、加前缀或拍平目录。若
+        <code>ENABLE_DEFAULT_FALLBACK_IMAGE=Yes</code>,兜底图对象也要一并复制。</p>
+      </div>
+
+      <h2 id="secret">第 4 步 — 迁移签名密钥</h2>
+      <p>签名是 <code>HMAC-SHA256(path[?sorted-query])</code> 的 hex 摘要——同一把密钥
+      在两朵云上算出同样的签名。把密钥迁过来,所有已签发的签名 URL(包括嵌在邮件、
+      App 里的长期链接)继续有效:</p>
+      <pre><code>aws secretsmanager get-secret-value --secret-id &lt;secret&gt; \
+    --query SecretString --output text &gt; /tmp/dit-sig.json
+
+terraform apply -var-file=terraform.tfvars \
+    -var "signature_secret_json=$(cat /tmp/dit-sig.json)"</code></pre>
+      <p><code>secret_key_name</code> 保持与 AWS 的
+      <code>SecretsManagerKeyParameter</code> 一致。完成后删除临时文件,永远不要提交
+      到代码库。</p>
+
+      <h2 id="deploy">第 5 步 — 部署与验证</h2>
+      <p>用 <a href="deploy.html">Launch Wizard 或 Terraform</a> 部署,参数值照抄
+      AWS。然后在<em>任何流量切换之前</em>完成验证:</p>
+      <ul>
+        <li>跑内置套件:<code>deployment/run-unit-tests.sh</code> 和
+            <code>BASE_URL=http://&lt;lb_ip&gt; deployment/run-e2e-tests.sh</code>。</li>
+        <li><strong>回放真实生产 URL</strong>——从 CloudFront 访问日志提取 top-N 路径,
+            对两套栈逐一请求,对比状态码、错误 JSON 和 <code>Content-Type</code>
+            (必须完全一致)。字节大小因编码器版本可能略有差异,比像素不比字节。
+            <code>smartCrop</code> 裁剪等价但非字节一致(Vision 与 Rekognition
+            的人脸框略有不同)。</li>
+        <li>验证用<em>现有 AWS 签名代码</em>生成的签名 URL 在 GCP 侧验签通过,篡改后
+            返回 <code>403 SignatureDoesNotMatch</code>。</li>
+        <li>用两次 <code>GET</code> 测 CDN 缓存(第二次响应带 <code>Age</code> 头)。
+            Cloud CDN 不缓存 <code>HEAD</code>——别用 <code>curl&nbsp;-I</code> 测。</li>
+      </ul>
+
+      <h2 id="cert">第 6 步 — 预签发 TLS 证书</h2>
+      <p>经典 Google 托管证书要等 DNS 指向负载均衡器<em>之后</em>才能激活——对零停机
+      迁移是"先有鸡还是先有蛋"的问题。用 <strong>Certificate Manager DNS 授权</strong>
+      解决:一条一次性 CNAME 证明域名所有权,在 CloudFront 仍承载 100% 流量时就把证书
+      签出来。把证书 map 挂到 Terraform 创建的 HTTPS 代理上(map 优先级高于经典证书),
+      然后在动 DNS 之前先验证:</p>
+      <pre><code>gcloud certificate-manager dns-authorizations create dit-authz --domain=img.example.com
+gcloud certificate-manager certificates create dit-cert \
+    --domains=img.example.com --dns-authorizations=dit-authz
+gcloud compute target-https-proxies update &lt;prefix&gt;-https-proxy --certificate-map=dit-cert-map
+
+curl -sv --resolve img.example.com:443:&lt;lb_ip&gt; https://img.example.com/&lt;test-path&gt; -o /dev/null</code></pre>
+
+      <h2 id="cutover">第 7 步 — 加权 DNS 切流</h2>
+      <p>两侧证书就绪后,给同一域名建两条加权记录——一条 <code>A</code> 记录指向 GCP
+      负载均衡器 IP,一条保留指向 CloudFront 的别名——按
+      10%&nbsp;→&nbsp;50%&nbsp;→&nbsp;100% 逐步提升,每一步留观察期,全程 TTL 保持
+      60 秒。GCP 侧盯这些:</p>
+      <pre><code># 负载均衡器:4xx/5xx 比率(和你的 CloudFront 基线比,不是和零比)
+gcloud logging read 'resource.type="http_load_balancer" httpRequest.status>=400' --freshness=1h
+
+# Cloud Run:应用错误
+gcloud logging read 'resource.type="cloud_run_revision" severity>=ERROR' --freshness=1h</code></pre>
+      <p>同时关注 Cloud CDN 缓存命中率——从接近 0% 起步,随缓存预热几小时内爬向你的
+      CloudFront 基线。可选:提升权重前用 top-N URL 对新端点 GET 一遍做预热。灰度期间
+      让 S3→GCS 传输任务持续按计划运行;到 100% 后,把<strong>写入路径</strong>(CMS、
+      媒体流水线)指向 GCS,最后跑一次传输清尾差,再停掉任务。</p>
+
+      <h2 id="rollback">回滚预案</h2>
+      <p>回滚只是一次 DNS 权重变更:把 CloudFront 拨回权重 100(一个 TTL 内生效——
+      60 秒)。迁移全程从未改动 AWS 栈,它直接恢复承载。唯一需要对账的状态是写入路径
+      切换后写进 GCS 的图片——且仅在已迁移写入路径时才存在。这份能力保留到观察期结束
+      (通常 100% 流量后 1–2 周),然后下线:删除 CloudFormation 栈,S3 只读保留
+      30–90 天后清理。</p>
+
+      <h2 id="differences">需要了解的行为差异</h2>
+      <p>以下差异都不需要改客户端,但运维和测试需要知道:</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>方面</th><th>AWS</th><th>GCP(本方案)</th><th>影响</th></tr>
+        <tr><td>WebP 变体缓存</td><td>CloudFront 用 <code>Accept</code> 头做缓存键</td><td>Cloud CDN 禁止 <code>Accept</code> 进缓存键 → 服务发出 <code>Vary: Accept</code></td><td>客户端无感;<code>AUTO_WEBP=Yes</code> 时探测会看到 <code>Vary: Accept</code></td></tr>
+        <tr><td><code>HEAD</code> 请求</td><td>从缓存响应</td><td>Cloud CDN 只缓存/回源 <code>GET</code></td><td>监控用 <code>GET</code>,别用 <code>curl -I</code></td></tr>
+        <tr><td>最大响应体</td><td>6 MB(Lambda)→ <code>413</code></td><td>32 MB(Cloud Run)</td><td>更宽松;<code>COMPAT_AWS_LIMITS=Yes</code> 可复刻 413</td></tr>
+        <tr><td>人脸检测</td><td>Rekognition</td><td>Cloud Vision <code>FACE_DETECTION</code></td><td>裁剪等价,非字节一致</td></tr>
+        <tr><td>内容审核</td><td>Rekognition 标签</td><td>Vision <code>SAFE_SEARCH_DETECTION</code>,likelihood → 0–100,接受标签别名</td><td>请求/响应形态一致</td></tr>
+        <tr><td>日志与指标</td><td>CloudWatch</td><td>Cloud Logging / Monitoring</td><td>重建看板与告警</td></tr>
+        <tr><td>URL 里的桶名前缀</td><td><code>s3:</code></td><td><code>s3:</code> 和 <code>gs:</code>,外加 <code>BUCKET_MAP</code></td><td>旧 URL 原样可用</td></tr>
+      </table>
+      </div>
+
+      <h2 id="best-practices">最佳实践清单</h2>
+      <ul>
+        <li>第一天就把 DNS TTL 降到 60 秒——切流和回滚都变成秒级操作。</li>
+        <li>绝不重新生成签名 URL——迁移密钥就够了。</li>
+        <li>Storage Transfer Service 要加调度,不要一次性拷贝——否则拷贝与切流之间的增量就是数据丢失窗口。</li>
+        <li>用 DNS 授权预签发证书——永远不要让证书签发卡住切流。</li>
+        <li>首次部署所有参数值与 AWS 保持一致;想改进,等迁移稳定后一次改一个变量。</li>
+        <li>用生产 URL 验证,不要只跑合成测试。</li>
+        <li>加权 DNS 灰度;错误率和你的 CloudFront 基线比,不是和零比。</li>
+        <li>观察期结束前不要下线 AWS——回滚必须始终是一个 60 秒操作。</li>
+        <li>先迁读路径,最后迁写路径。</li>
+      </ul>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

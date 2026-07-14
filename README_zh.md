@@ -203,7 +203,8 @@ BASE_URL=https://img.googledemo.com deployment/run-e2e-tests.sh
 
 | 文档 | 说明 |
 |---|---|
-| [实施指南(中英双语)](./source/docs-site/) | 9 章客户文档,Google Cloud 官方文档风格,部署后在 `/docs/` 在线可读 |
+| [实施指南(中英双语)](./source/docs-site/) | 10 章客户文档,Google Cloud 官方文档风格,部署后在 `/docs/` 在线可读 |
+| [`docs/MIGRATION_zh.md`](./docs/MIGRATION_zh.md)([English](./docs/MIGRATION.md)) | **AWS → GCP 迁移指南**:9 阶段零停机方案——评估、S3→GCS 传输、密钥迁移、影子验证、证书预签发、加权 DNS 灰度、回滚、下线——附完整 CFN→Terraform 参数映射表与最佳实践。在线版:[`/docs/zh/migrate.html`](https://img.googledemo.com/docs/zh/migrate.html) |
 | [`docs/COMPAT_SPEC.md`](./docs/COMPAT_SPEC.md) | 兼容性权威契约——每个滤镜、错误码、响应头、环境变量,逐 AWS 源码核对 |
 | [`storyline-run.md`](./storyline-run.md) | 上手演练:9 个可直接复制的场景(迁移 URL、AI 裁剪、签名、CDN 观测) |
 | [`DESIGN.md`](./DESIGN.md) | 架构决策、AWS→GCP 服务映射依据、权限模型 |

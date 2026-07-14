@@ -203,7 +203,8 @@ Full assumptions and a 500 M tier in the [cost planning page](./source/docs-site
 
 | Document | Description |
 |---|---|
-| [Implementation Guide (EN/中文)](./source/docs-site/) | 9-chapter customer-facing guide in Google Cloud documentation style, served at `/docs/` on the deployed endpoint |
+| [Implementation Guide (EN/中文)](./source/docs-site/) | 10-chapter customer-facing guide in Google Cloud documentation style, served at `/docs/` on the deployed endpoint |
+| [`docs/MIGRATION.md`](./docs/MIGRATION.md) ([中文](./docs/MIGRATION_zh.md)) | **AWS → GCP migration guide**: 9-phase zero-downtime plan — assess, S3→GCS transfer, secret migration, shadow validation, cert pre-issuance, weighted-DNS canary, rollback, decommission — plus a full CFN→Terraform parameter map and best practices. Also live at [`/docs/en/migrate.html`](https://img.googledemo.com/docs/en/migrate.html) |
 | [`docs/COMPAT_SPEC.md`](./docs/COMPAT_SPEC.md) | The authoritative compatibility contract — every filter, error code, header and env var, verified against AWS source |
 | [`storyline-run.md`](./storyline-run.md) | Hands-on walkthrough: 9 copy-pasteable scenarios (migration URLs, AI cropping, signing, CDN observation) |
 | [`DESIGN.md`](./DESIGN.md) | Architecture decisions, AWS→GCP service mapping rationale, permission model |

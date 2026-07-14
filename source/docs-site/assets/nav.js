@@ -24,6 +24,7 @@
     { file: "architecture.html",    en: "Architecture overview",  zh: "架构概览" },
     { file: "plan.html",            en: "Plan your deployment",   zh: "部署规划" },
     { file: "deploy.html",          en: "Deploy the solution",    zh: "部署方案" },
+    { file: "migrate.html",         en: "Migrate from AWS",       zh: "从 AWS 迁移" },
     { file: "use.html",             en: "Use the solution",       zh: "使用方案" },
     { file: "thumbor.html",         en: "Thumbor compatibility",  zh: "Thumbor 兼容" },
     { file: "api-reference.html",   en: "API reference",          zh: "API 参考" },
