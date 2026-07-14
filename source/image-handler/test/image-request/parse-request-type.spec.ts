@@ -19,9 +19,15 @@ describe("parseRequestType", () => {
     expect(imageRequest.parseRequestType({ path })).toEqual(RequestTypes.DEFAULT);
   });
 
-  it("should not return DEFAULT when the path is base64 but not JSON (falls through to THUMBOR)", () => {
+  it("should return DEFAULT for a base64-charset path even when the payload is not JSON (AWS regex-only quirk)", () => {
+    // AWS decides DEFAULT purely on the base64 regex; decoding fails later with
+    // 400 DecodeRequest::CannotDecodeRequest. Kept identical for migrations.
     const path = `/${Buffer.from("hello").toString("base64")}`; // aGVsbG8= — no extension
-    expect(imageRequest.parseRequestType({ path })).toEqual(RequestTypes.THUMBOR);
+    expect(imageRequest.parseRequestType({ path })).toEqual(RequestTypes.DEFAULT);
+  });
+
+  it("should NOT return DEFAULT when the path contains non-base64 characters", () => {
+    expect(imageRequest.parseRequestType({ path: "/folder/extensionless-image" })).toEqual(RequestTypes.THUMBOR);
   });
 
   it("should return CUSTOM when both rewrite env variables are set", () => {

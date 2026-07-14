@@ -22,7 +22,7 @@
         <tr><td>Global external Application Load Balancer</td>
             <td>Single anycast IP with a Google-managed SSL certificate. Routes <code>/demo/*</code> to the Demo UI backend bucket, <code>/docs/*</code> to the documentation backend bucket, and every other path to the image-handler API.</td></tr>
         <tr><td>Cloud CDN</td>
-            <td>Caches transformed images at Google edge locations. TTLs follow the origin <code>Cache-Control</code> header. The cache key includes the normalized <code>Accept</code> header so WebP and non-WebP clients get separate cache entries. Negative caching: 4xx for 10&nbsp;s, 5xx for 600&nbsp;s.</td></tr>
+            <td>Caches transformed images at Google edge locations. TTLs follow the origin <code>Cache-Control</code> header. When <code>AUTO_WEBP</code> is enabled the handler emits <code>Vary: Accept</code>, which Cloud CDN honors natively, so WebP and non-WebP clients get separate cache entries (Cloud CDN does not allow <code>Accept</code> in the cache key itself). Negative caching: 4xx for 10&nbsp;s, 5xx for 600&nbsp;s.</td></tr>
         <tr><td>Cloud Run <code>dit-image-handler</code></td>
             <td>Node.js 22 + sharp (TypeScript) service, 1 vCPU / 1&nbsp;GiB, <code>min-instances=0</code>. Parses the request (Default / Thumbor / Custom), fetches the source object, applies the edit pipeline and returns the image with cache headers.</td></tr>
         <tr><td>Cloud Storage source buckets</td>

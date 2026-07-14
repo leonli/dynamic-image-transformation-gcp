@@ -56,6 +56,12 @@ export async function handleRequest(
       Object.assign(headers, requestInfo.headers);
     }
     Object.assign(headers, getCorsHeaders(isAlb));
+    // Cloud CDN cannot key its cache on the Accept header (unlike CloudFront's
+    // cache-policy allowlist), but it natively honors `Vary: Accept` — emit it
+    // whenever AUTO_WEBP makes the response Accept-dependent.
+    if (process.env.AUTO_WEBP === "Yes") {
+      headers["Vary"] = "Accept";
+    }
     headers["Content-Type"] = requestInfo.contentType ?? "image";
     if (requestInfo.expires) headers["Expires"] = requestInfo.expires;
     if (requestInfo.lastModified) headers["Last-Modified"] = requestInfo.lastModified;

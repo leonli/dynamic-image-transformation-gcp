@@ -11,7 +11,7 @@
    │
    ▼
 Global External Application Load Balancer(全球 anycast IP + 托管 SSL 证书)
-   ├── Cloud CDN(缓存层,对标 CloudFront;缓存键含 Accept 头以支持 auto-webp)
+   ├── Cloud CDN(缓存层,对标 CloudFront;auto-webp 变体靠 `Vary: Accept` 缓存)
    ├── 路径 /demo/*  → Backend Bucket(demo UI 静态站,对标 AWS Demo UI)
    ├── 路径 /docs/*  → Backend Bucket(实施指南文档站,Google 文档风格)
    └── 默认(所有其他路径)→ Serverless NEG → Cloud Run(image-handler)
@@ -29,7 +29,7 @@ Global External Application Load Balancer(全球 anycast IP + 托管 SSL 证书)
 | AWS(v7 Lambda 架构) | GCP 对标 | 说明 |
 |---|---|---|
 | CloudFront | Cloud CDN + Global External ALB | 缓存 TTL 遵循源站 Cache-Control,negative caching 4xx=10s/5xx=600s |
-| CloudFront Function(请求归一化) | Cloud Run 入口中间件 | Accept 头归一化为 `image/webp`/空、query 白名单过滤+排序;CDN 缓存键 include Accept |
+| CloudFront Function(请求归一化) | Cloud Run 入口中间件 | Accept 头归一化为 `image/webp`/空、query 白名单过滤+排序;CDN 侧禁止 Accept 进缓存键,改由服务端 `Vary: Accept`(Cloud CDN 原生支持)区分变体 |
 | API Gateway + Lambda (Node.js + sharp) | Cloud Run(Node.js 22 + sharp,TypeScript) | 1 vCPU / 1GiB,min-instances=0,concurrency 适中;保留 AWS 6MB/413 行为为可选兼容开关 |
 | S3 源桶 | GCS 源桶(SOURCE_BUCKETS 白名单) | Thumbor 路径同时接受 `s3:<bucket>/` 与 `gs:<bucket>/` 前缀;可选 BUCKET_MAP 做 S3→GCS 桶名别名映射(迁移利器) |
 | Secrets Manager | Secret Manager | 同样存 JSON,`SECRET_KEY` 取键;签名算法逐字节一致(HMAC-SHA256 hex) |

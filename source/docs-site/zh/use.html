@@ -195,7 +195,7 @@ print(build_url(
       <p>开启 <code>AUTO_WEBP=Yes</code> 后,<code>Accept</code> 头包含
       <code>image/webp</code> 的请求自动输出 WebP。优先级:
       <code>edits.toFormat</code> &gt; AUTO_WEBP &gt; JSON <code>outputFormat</code>。CDN
-      缓存键包含归一化后的 Accept 头,两种变体各自正确缓存。</p>
+      服务端会返回 <code>Vary: Accept</code>(Cloud CDN 原生支持),两种变体各自正确缓存。</p>
 
       <h2 id="demo">到 Demo UI 动手试</h2>
       <p>部署后的 <a href="../../demo/" rel="noopener">Demo UI</a>

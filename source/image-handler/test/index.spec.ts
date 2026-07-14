@@ -85,6 +85,15 @@ describe("express app end-to-end (supertest)", () => {
     expect(res.status).toEqual(200);
     expect(res.headers["content-type"]).toEqual("image/webp");
     expect((res.body as Buffer).subarray(0, 4).toString()).toEqual("RIFF");
+    // Cloud CDN caches AUTO_WEBP variants via Vary: Accept (Accept cannot be a
+    // cache-key header on GCP; see modules/network-lb/main.tf).
+    expect(res.headers["vary"]).toEqual("Accept");
+  });
+
+  it("does not emit Vary: Accept when AUTO_WEBP is disabled", async () => {
+    const res = await request(app).get("/test.png").buffer(true).parse(binaryParser);
+    expect(res.status).toEqual(200);
+    expect(res.headers["vary"]).toBeUndefined();
   });
 
   it("serves a DEFAULT (base64 JSON) request with custom headers", async () => {

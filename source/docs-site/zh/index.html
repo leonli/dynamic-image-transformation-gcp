@@ -38,7 +38,7 @@
         <div class="card"><h3>智能裁剪与内容审核</h3>
           <p>由 Cloud Vision API(对标 Amazon Rekognition)提供人脸感知裁剪(smart crop)与基于 SafeSearch 的内容审核。</p></div>
         <div class="card"><h3>边缘缓存</h3>
-          <p>全球外部应用负载均衡器(Application Load Balancer)前置 Cloud CDN,处理结果全球缓存;缓存键包含 <code>Accept</code> 头以支持自动 WebP。</p></div>
+          <p>全球外部应用负载均衡器(Application Load Balancer)前置 Cloud CDN,处理结果全球缓存;自动 WebP 的不同变体通过 <code>Vary: Accept</code> 响应头分开缓存。</p></div>
         <div class="card"><h3>URL 签名</h3>
           <p>可选的 HMAC-SHA256 请求签名,密钥存于 Secret Manager——与 AWS 部署逐字节兼容。</p></div>
         <div class="card"><h3>稳健性</h3>
@@ -60,7 +60,7 @@
           <div class="arch-arrow">&rarr;</div>
           <div class="arch-box">全球外部 ALB<small>anycast IP · 托管 SSL 证书</small></div>
           <div class="arch-arrow">&rarr;</div>
-          <div class="arch-box">Cloud CDN<small>边缘缓存 · 缓存键含 Accept</small></div>
+          <div class="arch-box">Cloud CDN<small>边缘缓存 · Vary: Accept 变体</small></div>
         </div>
         <div class="arch-vert">&darr;</div>
         <div class="arch-row">

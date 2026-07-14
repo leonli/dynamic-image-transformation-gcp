@@ -121,6 +121,20 @@ sign() { # string-to-sign key
   printf '%s' "$1" | openssl dgst -sha256 -hmac "$2" -hex | awk '{print $NF}'
 }
 
+# Builds a full URL for a path (leading slash, no query). When the deployment
+# enforces signatures (ENABLE_SIGNATURE=Yes), every request must carry a valid
+# ?signature= — signature validation runs BEFORE the storage fetch, exactly as
+# in AWS, so even 404/400 test cases need signing.
+url_for() { # path-with-leading-slash
+  if [[ "${ENABLE_SIGNATURE:-No}" == "Yes" ]]; then
+    local key
+    key="${_SIGNING_KEY:=$(signature_key)}"
+    printf '%s%s?signature=%s' "${BASE_URL}" "$1" "$(sign "$1" "${key}")"
+  else
+    printf '%s%s' "${BASE_URL}" "$1"
+  fi
+}
+
 run_test() { # test-function-name description
   CURRENT_TEST="$2"
   CURRENT_FAILED=0
@@ -148,21 +162,22 @@ skip_test() { # description reason
 test_default_resize() {
   local req
   req="$(b64 "{\"key\":\"${TEST_IMAGE_KEY}\",\"edits\":{\"resize\":{\"width\":100,\"height\":100,\"fit\":\"inside\"}}}")"
-  request "${BASE_URL}/${req}" -H "Accept: */*"
+  request "$(url_for "/${req}")" -H "Accept: */*"
   assert_status 200
   assert_body_is_image "image/"
 }
 
 # THUMBOR request type: fit-in resize on a raw key path.
 test_thumbor_resize() {
-  request "${BASE_URL}/fit-in/100x100/${TEST_IMAGE_KEY}" -H "Accept: */*"
+  request "$(url_for "/fit-in/100x100/${TEST_IMAGE_KEY}")" -H "Accept: */*"
   assert_status 200
   assert_body_is_image "image/"
 }
 
 # Missing object must produce the AWS-shaped 404 NoSuchKey JSON.
 test_404_no_such_key() {
-  request "${BASE_URL}/fit-in/100x100/definitely-not-there-$(date +%s).jpg" -H "Accept: */*"
+  missing_path="/fit-in/100x100/definitely-not-there-$(date +%s).jpg"
+  request "$(url_for "${missing_path}")" -H "Accept: */*"
   assert_status 404
   assert_header_contains "Content-Type" "application/json"
   assert_json_field ".code" "NoSuchKey"
@@ -173,7 +188,8 @@ test_404_no_such_key() {
 # ({status,code,message} — all three fields present).
 test_400_error_shape() {
   # A DEFAULT-type request whose base64 payload decodes to invalid JSON.
-  request "${BASE_URL}/$(b64 '{not-json')" -H "Accept: */*"
+  bad_path="/$(b64 '{not-json')"
+  request "$(url_for "${bad_path}")" -H "Accept: */*"
   assert_status 400
   assert_header_contains "Content-Type" "application/json"
   assert_json_field ".status" "400"
@@ -186,7 +202,7 @@ test_400_error_shape() {
 
 # CORS headers on success responses when CORS_ENABLED=Yes.
 test_cors_headers() {
-  request "${BASE_URL}/fit-in/100x100/${TEST_IMAGE_KEY}" \
+  request "$(url_for "/fit-in/100x100/${TEST_IMAGE_KEY}")" \
     -H "Accept: */*" -H "Origin: https://example.com"
   assert_status 200
   local origin; origin="$(header "Access-Control-Allow-Origin")"
@@ -196,12 +212,12 @@ test_cors_headers() {
 
 # AUTO_WEBP: Accept: image/webp must switch the output format to WebP.
 test_auto_webp() {
-  request "${BASE_URL}/fit-in/100x100/${TEST_IMAGE_KEY}" \
+  request "$(url_for "/fit-in/100x100/${TEST_IMAGE_KEY}")" \
     -H "Accept: image/webp,image/*;q=0.8"
   assert_status 200
   assert_header_contains "Content-Type" "image/webp"
   # And without the webp Accept value the origin format must come back.
-  request "${BASE_URL}/fit-in/100x100/${TEST_IMAGE_KEY}" -H "Accept: image/jpeg"
+  request "$(url_for "/fit-in/100x100/${TEST_IMAGE_KEY}")" -H "Accept: image/jpeg"
   assert_status 200
   local ct; ct="$(header "Content-Type")"
   [[ "${ct}" != *"image/webp"* ]] || fail_msg "got webp without webp in Accept"

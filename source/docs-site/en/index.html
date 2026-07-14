@@ -40,7 +40,7 @@
         <div class="card"><h3>Smart crop &amp; moderation</h3>
           <p>Face-aware cropping and SafeSearch-based content moderation powered by Cloud Vision API (counterpart of Amazon Rekognition).</p></div>
         <div class="card"><h3>Edge caching</h3>
-          <p>Cloud CDN in front of a global external Application Load Balancer caches transformed images worldwide; the cache key includes the <code>Accept</code> header for automatic WebP.</p></div>
+          <p>Cloud CDN in front of a global external Application Load Balancer caches transformed images worldwide; automatic WebP variants are cached separately via <code>Vary: Accept</code>.</p></div>
         <div class="card"><h3>URL signing</h3>
           <p>Optional HMAC-SHA256 request signatures with the key stored in Secret Manager — byte-for-byte compatible with AWS deployments.</p></div>
         <div class="card"><h3>Resilience</h3>
@@ -62,7 +62,7 @@
           <div class="arch-arrow">&rarr;</div>
           <div class="arch-box">Global External ALB<small>anycast IP · managed SSL</small></div>
           <div class="arch-arrow">&rarr;</div>
-          <div class="arch-box">Cloud CDN<small>edge cache · Accept in cache key</small></div>
+          <div class="arch-box">Cloud CDN<small>edge cache · Vary: Accept variants</small></div>
         </div>
         <div class="arch-vert">&darr;</div>
         <div class="arch-row">

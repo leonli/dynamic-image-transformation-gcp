@@ -6,7 +6,7 @@
 
 枚举 `RequestTypes = { DEFAULT: "Default", CUSTOM: "Custom", THUMBOR: "Thumbor" }`:
 
-1. path 匹配 base64 正则 `/^(\/?)([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/` **且**能 base64→JSON 解析 → `DEFAULT`
+1. path 匹配 base64 正则 `/^(\/?)([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/` → `DEFAULT`(**仅看正则,不试解码**——AWS 原样;解码失败在后续 decodeRequest 抛 400 `CannotDecodeRequest`,纯 base64 字符组成的 key 无法走 Thumbor,这是 AWS 自身的已知怪癖,为无缝迁移原样保留)
 2. 否则 `REWRITE_MATCH_PATTERN` 与 `REWRITE_SUBSTITUTION` 均非空 → `CUSTOM`
 3. 否则 path 无扩展名,或以 `.jpg/.jpeg/.png/.webp/.tiff/.tif/.svg/.gif/.avif` 结尾 → `THUMBOR`
 4. 否则 400 `RequestTypeError`

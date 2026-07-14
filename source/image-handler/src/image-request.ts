@@ -99,7 +99,11 @@ export class ImageRequest {
   public parseRequestType(event: ImageHandlerEvent): RequestTypes {
     const { path } = event;
 
-    if (ImageRequest.MATCH_DEFAULT.test(path) && this.tryDecode(path) !== null) {
+    // AWS parity: DEFAULT is decided by the base64 regex ALONE — no decode attempt.
+    // A path made purely of base64 characters whose payload is not valid JSON gets
+    // 400 DecodeRequest::CannotDecodeRequest later (same quirk as AWS, where such
+    // keys are unreachable via Thumbor paths too).
+    if (ImageRequest.MATCH_DEFAULT.test(path)) {
       return RequestTypes.DEFAULT;
     }
     const { REWRITE_MATCH_PATTERN, REWRITE_SUBSTITUTION } = process.env;

@@ -205,8 +205,8 @@ print(build_url(
       <h2 id="auto-webp">Automatic WebP</h2>
       <p>With <code>AUTO_WEBP=Yes</code>, requests whose <code>Accept</code> header includes
       <code>image/webp</code> get WebP output. Precedence:
-      <code>edits.toFormat</code> &gt; AUTO_WEBP &gt; JSON <code>outputFormat</code>. The CDN
-      cache key includes the normalized Accept header, so both variants cache correctly.</p>
+      <code>edits.toFormat</code> &gt; AUTO_WEBP &gt; JSON <code>outputFormat</code>. The handler emits
+      <code>Vary: Accept</code>, which Cloud CDN honors, so both variants cache correctly.</p>
 
       <h2 id="demo">Try it in the Demo UI</h2>
       <p>The deployed <a href="../../demo/" rel="noopener">Demo UI</a> builds these JSON documents

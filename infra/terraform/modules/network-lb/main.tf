@@ -14,10 +14,12 @@
 #    which the image handler already emits AWS-compatibly (4xx max-age=10,
 #    5xx max-age=600, success max-age=31536000). Negative caching therefore
 #    needs no extra LB configuration.
-#  - The Accept request header is part of the cache key via
-#    cdn_policy.cache_key_policy.include_http_headers, so AUTO_WEBP responses
-#    for WebP-capable and legacy clients are cached separately (counterpart of
-#    the CloudFront cache policy header allowlist).
+#  - AUTO_WEBP cache correctness: Cloud CDN rejects well-known headers such as
+#    Accept in cache_key_policy.include_http_headers (API error "Cannot specify
+#    header name: Accept"). Instead, the image handler emits `Vary: Accept` when
+#    AUTO_WEBP is enabled; Cloud CDN natively caches separate variants for
+#    Vary: Accept, which is the working counterpart of the CloudFront cache
+#    policy header allowlist.
 
 resource "google_compute_global_address" "lb" {
   project = var.project_id
@@ -55,8 +57,9 @@ resource "google_compute_backend_service" "api" {
       include_host         = true
       include_protocol     = true
       include_query_string = true
-      # Vary the cache by the (normalized) Accept header for AUTO_WEBP.
-      include_http_headers = ["Accept"]
+      # NOTE: Accept must NOT be listed in include_http_headers (Cloud CDN
+      # forbids well-known headers here); AUTO_WEBP variants are handled via
+      # the handler's `Vary: Accept` response header instead.
     }
   }
 

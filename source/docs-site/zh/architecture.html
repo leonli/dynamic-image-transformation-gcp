@@ -22,7 +22,7 @@
         <tr><td>全球外部应用负载均衡器(Application Load Balancer)</td>
             <td>单一 anycast IP,挂 Google 托管 SSL 证书。<code>/demo/*</code> 路由到 Demo UI 后端桶,<code>/docs/*</code> 路由到文档后端桶,其余路径全部转发到 image-handler API。</td></tr>
         <tr><td>Cloud CDN</td>
-            <td>在 Google 边缘节点缓存处理后的图片。TTL 遵循源站 <code>Cache-Control</code>。缓存键包含归一化后的 <code>Accept</code> 头,WebP 与非 WebP 客户端各自独立缓存。负缓存(negative caching):4xx 缓存 10 秒,5xx 缓存 600 秒。</td></tr>
+            <td>在 Google 边缘节点缓存处理后的图片。TTL 遵循源站 <code>Cache-Control</code>。开启 <code>AUTO_WEBP</code> 时服务端返回 <code>Vary: Accept</code>(Cloud CDN 原生支持,缓存键本身不允许包含 Accept 头),WebP 与非 WebP 客户端各自独立缓存。负缓存(negative caching):4xx 缓存 10 秒,5xx 缓存 600 秒。</td></tr>
         <tr><td>Cloud Run <code>dit-image-handler</code></td>
             <td>Node.js 22 + sharp(TypeScript)服务,1 vCPU / 1&nbsp;GiB,<code>min-instances=0</code>。负责解析请求(Default / Thumbor / Custom)、读取源对象、执行编辑管线并附带缓存头返回图片。</td></tr>
         <tr><td>Cloud Storage 源图桶</td>
