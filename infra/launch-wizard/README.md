@@ -11,16 +11,16 @@ resources.
 ## Open in Cloud Shell
 
 The one-click counterpart of the AWS "Launch Stack" button. Replace
-`<REPO_URL>` with the HTTPS clone URL of this repository:
+the ready-to-use button below (repo URL already filled in):
 
 ```
-https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=<REPO_URL>&cloudshell_tutorial=infra/launch-wizard/tutorial.md
+https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/leonli/dynamic-image-transformation-gcp.git&cloudshell_tutorial=infra/launch-wizard/tutorial.md
 ```
 
 Markdown button:
 
 ```markdown
-[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=<REPO_URL>&cloudshell_tutorial=infra/launch-wizard/tutorial.md)
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/leonli/dynamic-image-transformation-gcp.git&cloudshell_tutorial=infra/launch-wizard/tutorial.md)
 ```
 
 Cloud Shell clones the repo and opens `tutorial.md` as a guided walkthrough in
