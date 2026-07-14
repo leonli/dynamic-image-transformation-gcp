@@ -34,19 +34,37 @@ The one-line promise this migration is built on:
 Both stacks run in parallel during the whole migration; there is no
 "big-bang" moment and no maintenance window.
 
-```
-                     ┌────────────────────────┐
-   img.example.com   │  Route 53 weighted DNS │
-  ───────────────────►  (TTL 60s)             │
-                     └───────┬───────────┬────┘
-                       90 %  │           │  10 %  → 50 % → 100 %
-                             ▼           ▼
-                   CloudFront + Lambda   Cloud CDN + Cloud Run
-                   (existing AWS stack)  (this solution)
-                             │           │
-                             ▼           ▼
-                            S3 ══sync══► GCS
-                                (Storage Transfer Service, incremental)
+```mermaid
+flowchart LR
+    Client["Users / Apps<br/>img.example.com"] --> DNS["Weighted DNS<br/>(Route 53, TTL 60 s)"]
+
+    subgraph AWS ["AWS — existing stack (kept running until decommission)"]
+        CF["CloudFront + Lambda<br/>(Dynamic Image Transformation v7)"]
+        S3["S3 source buckets"]
+        ASM["AWS Secrets Manager<br/>(HMAC signing key)"]
+        CF --> S3
+    end
+
+    subgraph GCP ["Google Cloud — this solution"]
+        CDN["Cloud CDN +<br/>Global External ALB"]
+        Run["Cloud Run<br/>(image-handler)"]
+        GCS["Cloud Storage<br/>(source buckets)"]
+        SM["Secret Manager<br/>(same HMAC key)"]
+        CDN --> Run --> GCS
+        Run --> SM
+    end
+
+    DNS -- "90% → 0%" --> CF
+    DNS -- "10% → 50% → 100%" --> CDN
+    S3 -. "Storage Transfer Service<br/>(incremental, repeatable)" .-> GCS
+    ASM -. "copy the secret JSON once —<br/>already-issued signed URLs stay valid" .-> SM
+
+    classDef gcp fill:#ffffff,stroke:#1a73e8,color:#202124;
+    classDef aws fill:#f8f9fa,stroke:#9aa0a6,color:#5f6368;
+    class CDN,Run,GCS,SM gcp;
+    class CF,S3,ASM aws;
+    style GCP fill:#f8fbff,stroke:#4285f4;
+    style AWS fill:#fafafa,stroke:#9aa0a6,stroke-dasharray:4 4;
 ```
 
 ---

@@ -31,19 +31,37 @@
 
 迁移全程两套栈并行运行,没有"一刀切"时刻,也不需要停机窗口。
 
-```
-                     ┌────────────────────────┐
-   img.example.com   │  Route 53 加权 DNS      │
-  ───────────────────►  (TTL 60s)             │
-                     └───────┬───────────┬────┘
-                       90 %  │           │  10 %  → 50 % → 100 %
-                             ▼           ▼
-                   CloudFront + Lambda   Cloud CDN + Cloud Run
-                   (现有 AWS 栈)          (本方案)
-                             │           │
-                             ▼           ▼
-                            S3 ══同步══► GCS
-                          (Storage Transfer Service,增量)
+```mermaid
+flowchart LR
+    Client["用户 / App<br/>img.example.com"] --> DNS["加权 DNS<br/>(Route 53,TTL 60 秒)"]
+
+    subgraph AWS ["AWS — 现有栈(下线前一直运行)"]
+        CF["CloudFront + Lambda<br/>(Dynamic Image Transformation v7)"]
+        S3["S3 源图桶"]
+        ASM["AWS Secrets Manager<br/>(HMAC 签名密钥)"]
+        CF --> S3
+    end
+
+    subgraph GCP ["Google Cloud — 本方案"]
+        CDN["Cloud CDN +<br/>全球外部应用负载均衡器"]
+        Run["Cloud Run<br/>(image-handler)"]
+        GCS["Cloud Storage<br/>(源图桶)"]
+        SM["Secret Manager<br/>(同一把 HMAC 密钥)"]
+        CDN --> Run --> GCS
+        Run --> SM
+    end
+
+    DNS -- "90% → 0%" --> CF
+    DNS -- "10% → 50% → 100%" --> CDN
+    S3 -. "Storage Transfer Service<br/>(增量、可重复执行)" .-> GCS
+    ASM -. "密钥 JSON 原样复制一次——<br/>已签发的签名 URL 继续有效" .-> SM
+
+    classDef gcp fill:#ffffff,stroke:#1a73e8,color:#202124;
+    classDef aws fill:#f8f9fa,stroke:#9aa0a6,color:#5f6368;
+    class CDN,Run,GCS,SM gcp;
+    class CF,S3,ASM aws;
+    style GCP fill:#f8fbff,stroke:#4285f4;
+    style AWS fill:#fafafa,stroke:#9aa0a6,stroke-dasharray:4 4;
 ```
 
 ---

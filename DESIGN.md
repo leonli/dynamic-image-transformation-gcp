@@ -6,22 +6,19 @@
 
 ## 1. 架构总览
 
-```
-用户/浏览器
-   │
-   ▼
-Global External Application Load Balancer(全球 anycast IP + 托管 SSL 证书)
-   ├── Cloud CDN(缓存层,对标 CloudFront;auto-webp 变体靠 `Vary: Accept` 缓存)
-   ├── 路径 /demo/*  → Backend Bucket(demo UI 静态站,对标 AWS Demo UI)
-   ├── 路径 /docs/*  → Backend Bucket(实施指南文档站,Google 文档风格)
-   └── 默认(所有其他路径)→ Serverless NEG → Cloud Run(image-handler)
-                                              │
-                        ┌─────────────────────┼──────────────────┐
-                        ▼                     ▼                  ▼
-                   GCS 源图桶(白名单)    Secret Manager       Cloud Vision API
-                   (对标 S3 源桶)      (签名密钥,对标      (smartCrop 人脸检测 /
-                                        Secrets Manager)     contentModeration SafeSearch,
-                                                             对标 Rekognition)
+```mermaid
+flowchart TD
+    User["用户 / 浏览器"] --> CDN["Cloud CDN<br/>(缓存层,对标 CloudFront;auto-webp 变体靠 Vary: Accept 缓存)"]
+    CDN --> LB["Global External Application Load Balancer<br/>(全球 anycast IP + 托管 SSL 证书)"]
+    LB -->|"/demo/*"| Demo["Backend Bucket<br/>(demo UI 静态站,对标 AWS Demo UI)"]
+    LB -->|"/docs/*"| Docs["Backend Bucket<br/>(实施指南文档站,Google 文档风格)"]
+    LB -->|"默认(所有其他路径)"| NEG["Serverless NEG"] --> Run["Cloud Run<br/>(image-handler)"]
+    Run --> GCS["GCS 源图桶(白名单)<br/>(对标 S3 源桶)"]
+    Run --> SM["Secret Manager<br/>(签名密钥,对标 Secrets Manager)"]
+    Run --> Vision["Cloud Vision API<br/>(smartCrop 人脸检测 / contentModeration SafeSearch,对标 Rekognition)"]
+
+    classDef gcp fill:#ffffff,stroke:#1a73e8,color:#202124;
+    class CDN,LB,NEG,Run,GCS,SM,Vision,Demo,Docs gcp;
 ```
 
 ## 2. AWS → GCP 服务映射
