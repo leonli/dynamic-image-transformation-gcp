@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solution overview — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Solution overview</h1>
+      <p>
+        <strong>Dynamic Image Transformation for Google Cloud CDN</strong> is a serverless image
+        processing solution that resizes, converts, watermarks and optimizes images on the fly,
+        directly from URLs — with results cached at the edge by Cloud CDN. It is a Google Cloud
+        counterpart of the AWS solution
+        <em>Dynamic Image Transformation for Amazon CloudFront</em>, designed so that customers
+        migrating from AWS can keep their existing image URLs, request schema, Thumbor filters,
+        signature algorithm and error contracts unchanged.
+      </p>
+
+      <div class="note">
+        <p><strong>Migrating from AWS?</strong> URL formats (base64 JSON and Thumbor paths),
+        the HMAC-SHA256 signature, all error codes and even the <code>s3:&lt;bucket&gt;/</code>
+        path prefix continue to work. See <a href="thumbor.html">Thumbor compatibility</a> for the
+        migration mapping features.</p>
+      </div>
+
+      <h2 id="features">Features</h2>
+      <div class="card-grid">
+        <div class="card"><h3>On-the-fly transformation</h3>
+          <p>Resize, crop, rotate, flip, blur, sharpen, format conversion (JPEG/PNG/WebP/AVIF/GIF/TIFF) and quality control through the sharp pipeline.</p></div>
+        <div class="card"><h3>Three request styles</h3>
+          <p>Base64-encoded JSON requests, Thumbor-compatible paths with 20 filters, and custom rewrite rules — identical semantics to the AWS solution.</p></div>
+        <div class="card"><h3>Smart crop &amp; moderation</h3>
+          <p>Face-aware cropping and SafeSearch-based content moderation powered by Cloud Vision API (counterpart of Amazon Rekognition).</p></div>
+        <div class="card"><h3>Edge caching</h3>
+          <p>Cloud CDN in front of a global external Application Load Balancer caches transformed images worldwide; the cache key includes the <code>Accept</code> header for automatic WebP.</p></div>
+        <div class="card"><h3>URL signing</h3>
+          <p>Optional HMAC-SHA256 request signatures with the key stored in Secret Manager — byte-for-byte compatible with AWS deployments.</p></div>
+        <div class="card"><h3>Resilience</h3>
+          <p>Optional fallback image on processing errors, bucket allow-listing, header deny list, and AWS-compatible error JSON for every failure mode.</p></div>
+      </div>
+
+      <h2 id="use-cases">Use cases</h2>
+      <ul>
+        <li><strong>Responsive web delivery</strong> — generate the exact size and format each device needs from a single master image, with automatic WebP for supporting browsers.</li>
+        <li><strong>E-commerce catalogs</strong> — thumbnails, zoom views and watermarked product shots from one source object, cached at the edge.</li>
+        <li><strong>User-generated content</strong> — moderate uploads with SafeSearch and blur flagged content before it is served.</li>
+        <li><strong>AWS migration</strong> — lift image workloads from CloudFront + Lambda to Cloud CDN + Cloud Run without touching client URLs.</li>
+      </ul>
+
+      <h2 id="architecture">Architecture at a glance</h2>
+      <div class="arch">
+        <div class="arch-row">
+          <div class="arch-box plain">User / Browser</div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">Global External ALB<small>anycast IP · managed SSL</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">Cloud CDN<small>edge cache · Accept in cache key</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box plain">/demo/* &rarr; Demo UI bucket</div>
+          <div class="arch-box plain">/docs/* &rarr; Docs bucket</div>
+          <div class="arch-box">default &rarr; Cloud Run<small>image-handler (Node.js 22 + sharp)</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box green">Cloud Storage<small>source buckets (allow list)</small></div>
+          <div class="arch-box green">Secret Manager<small>signature key</small></div>
+          <div class="arch-box green">Cloud Vision API<small>faces · SafeSearch</small></div>
+        </div>
+        <div class="arch-caption">All components are serverless; Cloud Run scales to zero when idle.</div>
+      </div>
+      <p>For the request flow in detail, see <a href="architecture.html">Architecture overview</a>.</p>
+
+      <h2 id="aws-mapping">AWS service mapping</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>AWS (v7 Lambda architecture)</th><th>Google Cloud</th></tr>
+        <tr><td>Amazon CloudFront</td><td>Cloud CDN + global external Application Load Balancer</td></tr>
+        <tr><td>CloudFront Function (request normalization)</td><td>Cloud Run entry middleware (Accept header + query normalization)</td></tr>
+        <tr><td>API Gateway + AWS Lambda (Node.js + sharp)</td><td>Cloud Run (Node.js 22 + sharp, TypeScript)</td></tr>
+        <tr><td>Amazon S3 source buckets</td><td>Cloud Storage source buckets (<code>SOURCE_BUCKETS</code> allow list)</td></tr>
+        <tr><td>AWS Secrets Manager</td><td>Secret Manager</td></tr>
+        <tr><td>Amazon Rekognition (DetectFaces / DetectModerationLabels)</td><td>Cloud Vision API (FACE_DETECTION / SAFE_SEARCH_DETECTION)</td></tr>
+        <tr><td>Amazon CloudWatch</td><td>Cloud Logging + Cloud Monitoring</td></tr>
+        <tr><td>CloudFormation one-click deployment</td><td>Launch Wizard (Open in Cloud Shell, drives Terraform)</td></tr>
+        <tr><td>CDK source deployment</td><td>Terraform module (<code>infra/terraform/</code>)</td></tr>
+      </table>
+      </div>
+
+      <h2 id="next">Next steps</h2>
+      <ol>
+        <li>Read the <a href="architecture.html">architecture overview</a>.</li>
+        <li><a href="plan.html">Plan your deployment</a> — cost, security, quotas.</li>
+        <li><a href="deploy.html">Deploy the solution</a> with the Launch Wizard or Terraform.</li>
+        <li><a href="use.html">Use the solution</a> and try the <a href="../../demo/" rel="noopener">Demo UI</a>.</li>
+      </ol>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

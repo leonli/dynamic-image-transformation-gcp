@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卸载方案 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>卸载方案</h1>
+      <p>用与部署时相同的方式卸载。</p>
+
+      <h2 id="wizard">Launch Wizard 部署</h2>
+<pre><code>./infra/launch-wizard/launch-wizard.sh --destroy</code></pre>
+      <p>向导会回放当初记录的变量值,展示销毁计划并要求确认,底层执行的是
+      <code>terraform destroy</code>。</p>
+
+      <h2 id="terraform">Terraform 部署</h2>
+<pre><code>cd infra/terraform
+terraform destroy</code></pre>
+      <p>确认前请仔细审阅销毁计划。</p>
+
+      <h2 id="whats-removed">会删除的资源</h2>
+      <ul>
+        <li>Cloud Run 服务 <code>dit-image-handler</code> 及其 serverless NEG</li>
+        <li>负载均衡器 <code>dit-lb</code>:转发规则、全局 IP、托管 SSL 证书、URL map、后端服务及 Cloud CDN 配置</li>
+        <li>方案自建桶(<code>…-dit-demo</code>、<code>…-dit-docs</code>、<code>…-dit-logs</code>)及其内容</li>
+        <li>密钥 <code>dit-signature-secret</code>(若由部署创建)</li>
+        <li>部署创建的资源级 IAM 绑定</li>
+      </ul>
+
+      <h2 id="whats-kept">会保留的资源</h2>
+      <ul>
+        <li><strong>你的源图桶</strong> —— 部署从不创建或删除 <code>source_buckets</code> 中列出的客户数据桶。</li>
+        <li>Artifact Registry(仓库 <code>dit</code>)中的容器镜像 —— 不需要时手动删除:
+<pre><code>gcloud artifacts repositories delete dit --location=asia-southeast1</code></pre></li>
+        <li>已写入 Cloud Logging 的日志(按保留策略过期)。</li>
+        <li>你自行创建的 DNS 记录 —— 图片域名的 <code>A</code> 记录请自行清理。</li>
+      </ul>
+
+      <div class="warning"><p><strong>销毁之前:</strong>如果仍有客户端把图片域名解析到这台负载均衡器,销毁后会立即报错。请先改走或删除
+      DNS 记录,等 TTL 过期再执行销毁。</p></div>
+
+      <p>销毁中断后直接重跑即可——Terraform 会从已记录的状态续做。兜底手段:在控制台按前缀
+      <code>dit-</code> 搜索,确认上述资源均已清理。</p>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

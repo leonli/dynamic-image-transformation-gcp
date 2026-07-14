@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thumbor compatibility — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Thumbor compatibility</h1>
+      <p>Thumbor-style paths work exactly as in the AWS solution — this page is the key
+      reference for teams migrating existing CloudFront image URLs.</p>
+
+      <h2 id="path">Path anatomy</h2>
+<pre><code>/[fit-in/][AxB:CxD/][WxH/][filters:f1(v):f2(v)/]key</code></pre>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Segment</th><th>Meaning</th><th>Example</th></tr>
+        <tr><td><code>fit-in</code></td><td>Resize with <code>fit=inside</code> (letterbox instead of crop).</td><td><code>/fit-in/300x300/cat.jpg</code></td></tr>
+        <tr><td><code>AxB:CxD</code></td><td>Manual crop: left=A, top=B, width=C−A, height=D−B (each 1–6 digits).</td><td><code>/10x20:110x220/cat.jpg</code></td></tr>
+        <tr><td><code>WxH</code></td><td>Resize target. A dimension of <code>0</code> means “auto” and implies <code>fit=inside</code>.</td><td><code>/300x0/cat.jpg</code></td></tr>
+        <tr><td><code>filters:…</code></td><td>Colon-separated filter list. Filters are sorted alphabetically before they are applied (so <code>format</code> always precedes <code>quality</code>).</td><td><code>/filters:format(webp):quality(80)/cat.jpg</code></td></tr>
+        <tr><td><code>key</code></td><td>Object key in the default source bucket, URL-decoded.</td><td><code>photos/cat.jpg</code></td></tr>
+      </table>
+      </div>
+
+      <h2 id="buckets">Bucket prefixes: <code>s3:</code> and <code>gs:</code></h2>
+      <p>A path segment of the form <code>s3:&lt;bucket&gt;/</code> or <code>gs:&lt;bucket&gt;/</code>
+      selects a different source bucket. If the bucket is on the <code>SOURCE_BUCKETS</code>
+      allow list it overrides the default; otherwise the segment is ignored.</p>
+<pre><code>/300x300/gs:my-other-bucket/photos/cat.jpg
+/300x300/s3:legacy-aws-bucket/photos/cat.jpg   &larr; still accepted after migration</code></pre>
+
+      <h3 id="bucket-map">BUCKET_MAP: migrate S3 URLs without rewriting them</h3>
+      <p>If your existing URLs embed S3 bucket names that don’t exist on GCS, configure
+      <code>BUCKET_MAP</code> with comma-separated <code>s3name=gcsname</code> pairs:</p>
+<pre><code>BUCKET_MAP="prod-images-us-east-1=my-gcs-images,assets-bucket=my-gcs-assets"</code></pre>
+      <p>Then <code>/300x300/s3:prod-images-us-east-1/cat.jpg</code> transparently reads
+      <code>gs://my-gcs-images/cat.jpg</code>. Allow-listing applies to the <em>mapped</em>
+      (GCS) name. Combined with the unchanged signature algorithm, most AWS clients migrate with
+      a DNS change only.</p>
+
+      <h2 id="filters">Filter reference (all 20)</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Filter</th><th>Syntax</th><th>Example URL</th><th>Behavior</th></tr>
+        <tr><td><code>autojpg</code></td><td><code>autojpg()</code></td><td class="wrap"><code class="wrap">/filters:autojpg()/cat.png</code></td><td>Force JPEG output.</td></tr>
+        <tr><td><code>background_color</code></td><td><code>background_color(color)</code></td><td class="wrap"><code class="wrap">/filters:background_color(ffffff)/logo.png</code></td><td>Flatten transparency onto a background. CSS color names or hex (a leading <code>#</code> is added for non-named values).</td></tr>
+        <tr><td><code>blur</code></td><td><code>blur(radius[,sigma])</code></td><td class="wrap"><code class="wrap">/filters:blur(7)/cat.jpg</code></td><td>Gaussian blur; sigma defaults to radius/2.</td></tr>
+        <tr><td><code>convolution</code></td><td><code>convolution(matrix,width)</code></td><td class="wrap"><code class="wrap">/filters:convolution(-1;-1;-1;-1;8;-1;-1;-1;-1,3)/cat.jpg</code></td><td>Custom kernel; matrix items separated by <code>;</code>, height inferred from length/width.</td></tr>
+        <tr><td><code>equalize</code></td><td><code>equalize()</code></td><td class="wrap"><code class="wrap">/filters:equalize()/cat.jpg</code></td><td>Histogram normalization (sharp <code>normalize</code>).</td></tr>
+        <tr><td><code>fill</code></td><td><code>fill(color)</code></td><td class="wrap"><code class="wrap">/fit-in/300x300/filters:fill(0057e7)/cat.jpg</code></td><td>Letterbox with the given background: sets <code>fit=contain</code> and the resize background color.</td></tr>
+        <tr><td><code>format</code></td><td><code>format(fmt)</code></td><td class="wrap"><code class="wrap">/filters:format(webp)/cat.jpg</code></td><td>Output format: heic, heif, jpeg, png, raw, tiff, webp, gif, avif (<code>jpg</code> → jpeg).</td></tr>
+        <tr><td><code>grayscale</code></td><td><code>grayscale()</code></td><td class="wrap"><code class="wrap">/filters:grayscale()/cat.jpg</code></td><td>Convert to grayscale.</td></tr>
+        <tr><td><code>no_upscale</code></td><td><code>no_upscale()</code></td><td class="wrap"><code class="wrap">/800x800/filters:no_upscale()/small.jpg</code></td><td>Never enlarge beyond the source (<code>withoutEnlargement</code>).</td></tr>
+        <tr><td><code>proportion</code></td><td><code>proportion(ratio)</code></td><td class="wrap"><code class="wrap">/filters:proportion(0.5)/cat.jpg</code></td><td>Scale target (or source) dimensions by the ratio.</td></tr>
+        <tr><td><code>quality</code></td><td><code>quality(1–100)</code></td><td class="wrap"><code class="wrap">/filters:format(jpeg):quality(70)/cat.jpg</code></td><td>Lossy quality for the output format (format taken from the URL extension or <code>format()</code>).</td></tr>
+        <tr><td><code>rgb</code></td><td><code>rgb(r,g,b)</code></td><td class="wrap"><code class="wrap">/filters:rgb(20,-20,40)/cat.jpg</code></td><td>Tint; parameters are percentages mapped to 0–255.</td></tr>
+        <tr><td><code>rotate</code></td><td><code>rotate(deg)</code></td><td class="wrap"><code class="wrap">/filters:rotate(90)/cat.jpg</code></td><td>Rotate. Empty parentheses trigger EXIF auto-orientation.</td></tr>
+        <tr><td><code>sharpen</code></td><td><code>sharpen(a,b[,c])</code></td><td class="wrap"><code class="wrap">/filters:sharpen(2,1.0)/cat.jpg</code></td><td>Sharpen with sigma <code>1 + b/2</code>.</td></tr>
+        <tr><td><code>stretch</code></td><td><code>stretch()</code></td><td class="wrap"><code class="wrap">/300x300/filters:stretch()/cat.jpg</code></td><td>Ignore aspect ratio (<code>fit=fill</code>) — unless <code>fit-in</code> is present.</td></tr>
+        <tr><td><code>strip_exif</code></td><td><code>strip_exif()</code></td><td class="wrap"><code class="wrap">/filters:strip_exif()/cat.jpg</code></td><td>Remove EXIF metadata, keep the ICC profile.</td></tr>
+        <tr><td><code>strip_icc</code></td><td><code>strip_icc()</code></td><td class="wrap"><code class="wrap">/filters:strip_icc()/cat.jpg</code></td><td>Replace the ICC profile with sRGB, keep EXIF.</td></tr>
+        <tr><td><code>upscale</code></td><td><code>upscale()</code></td><td class="wrap"><code class="wrap">/300x300/filters:upscale()/small.jpg</code></td><td>Sets <code>fit=inside</code> so small images may be enlarged.</td></tr>
+        <tr><td><code>watermark</code></td><td class="wrap"><code class="wrap">watermark(bucket,key,x,y,alpha[,wRatio,hRatio])</code></td><td class="wrap"><code class="wrap">/filters:watermark(my-bucket,logo.png,-10,10p,40,20,20)/cat.jpg</code></td><td>Overlay an image. <code>x</code>/<code>y</code> are pixels (negative = from right/bottom) or <code>NNp</code> percent; <code>alpha</code> 0–100.</td></tr>
+        <tr><td><code>animated</code></td><td><code>animated(bool)</code></td><td class="wrap"><code class="wrap">/filters:animated(true)/sticker.gif</code></td><td>Force animated processing on or off (any value except <code>false</code> is true).</td></tr>
+        <tr><td><code>smart_crop</code></td><td><code>smart_crop([index[,padding]])</code></td><td class="wrap"><code class="wrap">/300x300/filters:smart_crop(0,30)/team.jpg</code></td><td>Face-aware crop via Cloud Vision (see <a href="use.html#smart-crop">Use the solution</a>).</td></tr>
+      </table>
+      </div>
+      <div class="note"><p>Filters are applied in <strong>alphabetical order</strong>, not URL
+      order — identical to the AWS implementation. This guarantees, for example, that
+      <code>format()</code> is applied before <code>quality()</code> regardless of how the URL is
+      written.</p></div>
+
+      <h2 id="custom">Custom rewrites</h2>
+      <p>If your legacy URLs don’t match Thumbor syntax, set <code>REWRITE_MATCH_PATTERN</code>
+      (a regular expression) and <code>REWRITE_SUBSTITUTION</code>. Matching paths are rewritten
+      first and then parsed as Thumbor paths — the same <em>Custom request</em> mechanism as the
+      AWS solution.</p>
+<pre><code>REWRITE_MATCH_PATTERN="/thumbs/(\d+)/(.*)"
+REWRITE_SUBSTITUTION="/fit-in/$1x$1/$2"
+# /thumbs/200/cat.jpg  →  /fit-in/200x200/cat.jpg</code></pre>
+
+      <h2 id="checklist">Migration checklist (CloudFront → Cloud CDN)</h2>
+      <ol>
+        <li>Deploy with <code>SOURCE_BUCKETS</code> pointing at your GCS buckets; add <code>BUCKET_MAP</code> entries for any S3 bucket names embedded in URLs.</li>
+        <li>Copy the signature secret JSON into Secret Manager unchanged and keep the same <code>SECRET_KEY</code> — existing signed URLs verify as-is.</li>
+        <li>Keep <code>REWRITE_MATCH_PATTERN</code>/<code>REWRITE_SUBSTITUTION</code> values from your AWS deployment.</li>
+        <li>Point the image domain’s DNS at the load balancer IP (test first with a staging hostname).</li>
+        <li>Run <code>deployment/run-e2e-tests.sh</code> against the new endpoint and compare a sample of production URLs byte-for-byte or visually.</li>
+      </ol>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

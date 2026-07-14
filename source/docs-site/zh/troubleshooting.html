@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>故障排查 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>故障排查</h1>
+
+      <h2 id="signature-403">403 SignatureDoesNotMatch</h2>
+      <p>服务端算出的 HMAC 与 <code>?signature=</code> 不一致。按此清单核对:</p>
+      <ul>
+        <li><strong>待签串(string-to-sign)</strong>必须是<em>含前导斜杠</em>的 path,加 <code>?</code> 与<strong>按键排序后</strong>的其余 query 参数(<code>signature</code> 本身除外),中间不得再做 URL 编码。</li>
+        <li><strong>JSON 字节级一致。</strong>签名覆盖的是 base64 字符串,任何 JSON 重新序列化(键序、空白、<code>separators</code>)都会得到不同的 path。要对实际发送的字符串签名。</li>
+        <li><strong>密钥取值。</strong>Secret Manager 里存的是 JSON 文档,HMAC 密钥是 <code>SECRET_KEY</code> 指向的值,不是整份 JSON。核对:
+<pre><code>gcloud secrets versions access latest --secret=dit-signature-secret</code></pre></li>
+        <li><strong>摘要格式</strong>是小写十六进制(hex),不是 base64。</li>
+        <li>没带签名(而非签错)返回 <code>400 AuthorizationQueryParametersError</code>;出现 500 <code>SignatureValidationFailure</code> 通常是服务读不到密钥——确认运行时服务账号有 <code>roles/secretmanager.secretAccessor</code>。</li>
+      </ul>
+
+      <h2 id="nosuchkey">404 NoSuchKey</h2>
+      <p>“The image &lt;key&gt; does not exist or the request may not be base64 encoded
+      properly.” 任何 GCS 读取失败都会映射到这个错误,按顺序排查:</p>
+      <ol>
+        <li><strong>解码自己的 URL</strong>,检查 JSON 内容:
+<pre><code>echo 'eyJrZXkiOiJwaG90b3MvY2F0LmpwZyJ9' | base64 -d</code></pre>
+            base64 被截断或被中间系统改写(结尾 <code>=</code> 被去掉、<code>+</code> 被换成空格)是最常见原因。</li>
+        <li><strong>对象是否存在?</strong><code>gsutil ls gs://my-image-bucket/photos/cat.jpg</code> —— key 区分大小写,且不能以斜杠开头。</li>
+        <li><strong>权限。</strong>Cloud Run 运行时服务账号需要源桶上的 <code>roles/storage.objectViewer</code>。权限不足的读取同样表现为 404(设计如此,避免泄露桶结构)。</li>
+        <li><strong>桶用错了。</strong>省略 <code>bucket</code> 时取 <code>SOURCE_BUCKETS</code> 的第一个——确认它确实是你预期的桶。</li>
+      </ol>
+
+      <h2 id="cdn-miss">CDN 缓存不命中</h2>
+      <p>先看响应头:</p>
+<pre><code>curl -sI "https://img.example.com/&lt;base64&gt;" | grep -i -e age -e cache-control -e etag</code></pre>
+      <ul>
+        <li><strong>有 <code>Age</code> 且在增长</strong> → 响应来自 CDN 边缘缓存;<strong>没有 <code>Age</code></strong> → 未命中(或响应不可缓存)。</li>
+        <li><strong>检查 <code>Cache-Control</code>。</strong>Cloud CDN 遵循源站响应头。若源对象元数据带 <code>Cache-Control: private</code> 或 <code>no-store</code>,会被透传,CDN 不缓存——修正对象元数据(<code>gsutil setmeta -h "Cache-Control:max-age=31536000,public" gs://…</code>),或清掉它以启用默认的 <code>max-age=31536000,public</code>。</li>
+        <li><strong><code>expires</code> URL</strong> 会把 <code>Cache-Control</code> 改写为剩余有效期——短时效链接缓存效果差是设计使然。</li>
+        <li><strong>URL 不稳定。</strong>缓存键 = 完整 URL + 归一化后的 <code>Accept</code> 头。随机 query 参数会被归一化剔除(不会打散缓存),但<em>路径</em>不同——例如 JSON 键序不固定——会各自成为独立缓存项。请确定性地序列化 JSON。</li>
+        <li><strong>部署后的第一次请求</strong>必然未命中;错误响应只缓存 10 秒(4xx)/ 600 秒(5xx)。</li>
+      </ul>
+
+      <h2 id="vision">Vision 相关错误(smartCrop / contentModeration)</h2>
+      <ul>
+        <li><code>500 SmartCrop::Error</code> 或 <code>500 Rekognition::DetectModerationLabelsError</code> —— Vision API 调用失败。确认已启用 API(<code>gcloud services enable vision.googleapis.com</code>)、运行时服务账号有调用权限,再看配额(默认约 1,800 次/分钟)。</li>
+        <li><code>400 SmartCrop::FaceIndexOutOfRange</code> —— 检出的人脸数少于 <code>faceIndex</code>。注意人脸按包围框面积从大到小排序,多人脸图片上可能与 Rekognition 的顺序不同。</li>
+        <li>审核“不起作用” —— 可能性等级到置信度的映射是粗粒度的(步长 25);<code>minConfidence</code> 为 75 意味着至少 LIKELY 才命中。想连 POSSIBLE 一起拦,调到 50。</li>
+      </ul>
+
+      <h2 id="misc">其他问题</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>现象</th><th>可能原因 / 处理</th></tr>
+        <tr><td><code>403 ImageBucket::CannotAccessBucket</code></td><td>请求的桶不在 <code>SOURCE_BUCKETS</code> 里。加进去(Terraform 变量 <code>source_buckets</code>)后重新部署;旧 <code>s3:</code> 桶名配 <code>BUCKET_MAP</code>。</td></tr>
+        <tr><td><code>400 RequestTypeError</code></td><td>路径既不是合法 base64 JSON,也不是扩展名受支持的 Thumbor 路径。检查 URL 是否被截断。</td></tr>
+        <tr><td><code>413 TooLargeImageException</code></td><td>只在 <code>COMPAT_AWS_LIMITS=Yes</code> 时出现。除非明确需要 AWS 对等行为,否则关掉。</td></tr>
+        <tr><td>证书一直 <code>PROVISIONING</code></td><td>DNS <code>A</code> 记录还没指向负载均衡器 IP。托管证书要等 DNS 解析生效后才签发,传播后最长约一小时。</td></tr>
+        <tr><td>直接访问 <code>*.run.app</code> 返回 403/404</td><td>符合预期:入站被限制为仅负载均衡器。请始终通过 LB 域名测试。</td></tr>
+        <tr><td>空闲后的第一个请求偏慢</td><td><code>min-instances=0</code> 的冷启动。若 p99 延迟比成本更重要,设 <code>min-instances=1</code>。</td></tr>
+      </table>
+      </div>
+
+      <h2 id="logs">去哪里看日志</h2>
+<pre><code># Request logs (structured, includes requestId and error details)
+gcloud logging read 'resource.type="cloud_run_revision"
+  resource.labels.service_name="dit-image-handler"' --limit=50 --format=json
+
+# CDN cache statistics
+# Console → Network services → Load balancing → dit-lb → Monitoring (cache hit ratio)</code></pre>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用方案 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>使用方案</h1>
+      <p>主推的请求形式是把 base64 编码的 JSON 文档放进 URL 路径(即 <em>Default</em>
+      请求)。Thumbor 风格路径见 <a href="thumbor.html">Thumbor 兼容</a>;完整 schema
+      与错误码表见 <a href="api-reference.html">API 参考</a>。</p>
+
+      <h2 id="default-requests">构造 Default 请求</h2>
+      <p>先组装 JSON,再 base64 编码,拼到端点后面:</p>
+<pre><code>{
+  "bucket": "my-image-bucket",
+  "key": "photos/cat.jpg",
+  "edits": {
+    "resize": { "width": 300, "height": 300, "fit": "cover" }
+  },
+  "outputFormat": "webp"
+}</code></pre>
+<pre><code>https://img.example.com/eyJidWNrZXQiOiJteS1pbWFnZS1idWNrZXQiLCJrZXkiOiJwaG90b3MvY2F0LmpwZyIsImVkaXRzIjp7InJlc2l6ZSI6eyJ3aWR0aCI6MzAwLCJoZWlnaHQiOjMwMCwiZml0IjoiY292ZXIifX0sIm91dHB1dEZvcm1hdCI6IndlYnAifQ==</code></pre>
+      <ul>
+        <li><code>bucket</code> 可省略——缺省取 <code>SOURCE_BUCKETS</code> 白名单的第一个桶,且必须在白名单内。</li>
+        <li><code>edits</code> 在 <code>resize</code> 之后按键序依次执行;多数 sharp 操作直通(见 <a href="api-reference.html#schema">schema</a>)。</li>
+        <li>既没有 <code>edits</code> 也没有 <code>outputFormat</code> 时,原始对象原样返回。</li>
+      </ul>
+
+      <h3 id="signing">Node.js —— 构造并签名 URL</h3>
+<pre><code>const crypto = require("crypto");
+
+const SECRET = process.env.DIT_SECRET;      // value stored in Secret Manager under SECRET_KEY
+const ENDPOINT = "https://img.example.com";
+
+function buildUrl(request, query = {}) {
+  const path = "/" + Buffer.from(JSON.stringify(request)).toString("base64");
+
+  // string-to-sign = path + ("?" + query sorted by key, signature excluded)
+  const qs = Object.keys(query).sort()
+    .map((k) =&gt; `${k}=${query[k]}`).join("&amp;");
+  const stringToSign = qs ? `${path}?${qs}` : path;
+
+  const signature = crypto.createHmac("sha256", SECRET)
+    .update(stringToSign).digest("hex");
+
+  const sep = qs ? "&amp;" : "?";
+  return `${ENDPOINT}${path}${qs ? "?" + qs : ""}${sep}signature=${signature}`;
+}
+
+console.log(buildUrl(
+  { bucket: "my-image-bucket", key: "photos/cat.jpg",
+    edits: { resize: { width: 300, fit: "cover" } } },
+  { expires: "20261231T235959Z" }
+));</code></pre>
+
+      <h3>Python —— 构造并签名 URL</h3>
+<pre><code>import base64, hashlib, hmac, json, os
+
+SECRET = os.environ["DIT_SECRET"].encode()
+ENDPOINT = "https://img.example.com"
+
+def build_url(request: dict, query: dict | None = None) -&gt; str:
+    path = "/" + base64.b64encode(
+        json.dumps(request, separators=(",", ":")).encode()).decode()
+
+    qs = "&amp;".join(f"{k}={v}" for k, v in sorted((query or {}).items()))
+    string_to_sign = f"{path}?{qs}" if qs else path
+
+    signature = hmac.new(SECRET, string_to_sign.encode(), hashlib.sha256).hexdigest()
+    sep = "&amp;" if qs else "?"
+    return f"{ENDPOINT}{path}{'?' + qs if qs else ''}{sep}signature={signature}"
+
+print(build_url(
+    {"bucket": "my-image-bucket", "key": "photos/cat.jpg",
+     "edits": {"resize": {"width": 300, "fit": "cover"}}},
+    {"expires": "20261231T235959Z"},
+))</code></pre>
+      <div class="note"><p>只有部署设置了 <code>ENABLE_SIGNATURE=Yes</code> 才会强制校验签名。缺签名返回
+      <code>400 AuthorizationQueryParametersError</code>,签名错误返回
+      <code>403 SignatureDoesNotMatch</code>。为 AWS 方案编写的客户端生成的签名可直接通过校验。</p></div>
+
+      <h2 id="query-edits">query 参数 edits</h2>
+      <p>以下参数对任何请求类型都会叠加(并覆盖)路径中的 edits:</p>
+<pre><code>https://img.example.com/&lt;base64&gt;?width=400&amp;height=300&amp;fit=cover&amp;format=webp&amp;grayscale=true</code></pre>
+      <p>支持:<code>format</code>、<code>fit</code>、<code>width</code>、<code>height</code>、
+      <code>rotate</code>、<code>flip</code>、<code>flop</code>、<code>grayscale</code> /
+      <code>greyscale</code>。width/height 传 <code>0</code> 或空即清空该维度;flip/flop/grayscale
+      的 <code>"0"</code>、<code>"false"</code>、空串视为假。其余 query
+      参数在边缘就被丢弃(不会打散缓存键)。解析失败返回 <code>400 QueryParameterParsingError</code>。</p>
+
+      <h2 id="examples">常用编辑</h2>
+      <h3>缩放、格式、质量</h3>
+<pre><code>{
+  "key": "photos/cat.jpg",
+  "edits": {
+    "resize": { "width": 800, "fit": "inside" },
+    "jpeg": { "quality": 75 }
+  },
+  "outputFormat": "jpeg"
+}</code></pre>
+      <p><code>fit</code> 可取 <code>cover</code>、<code>contain</code>、<code>fill</code>、
+      <code>inside</code>(默认)、<code>outside</code>。宽高会四舍五入,≤ 0 返回
+      <code>400 InvalidResizeException</code>。输出 WebP 时可加顶层
+      <code>"effort": 0–6</code>(默认 4)。</p>
+
+      <h3 id="smart-crop">智能裁剪(人脸检测)</h3>
+<pre><code>{ "key": "people/team.jpg",
+  "edits": { "smartCrop": { "faceIndex": 0, "padding": 40 } } }</code></pre>
+      <p>由 Cloud Vision FACE_DETECTION 找出人脸;裁剪框为选中人脸的包围框向外扩
+      <code>padding</code> 像素,并收敛到图内。人脸按包围框面积从大到小排序,因此
+      <code>faceIndex: 0</code> 永远是最显著的人脸。未检测到人脸时返回整图。参数越界分别返回
+      <code>400 SmartCrop::FaceIndexOutOfRange</code> 与 <code>400 SmartCrop::PaddingOutOfBounds</code>。
+      <code>"smartCrop": true</code> 等价于全默认值。</p>
+
+      <h3 id="moderation">内容审核</h3>
+<pre><code>{ "key": "ugc/upload-123.jpg",
+  "edits": { "contentModeration": {
+      "minConfidence": 75, "blur": 50,
+      "moderationLabels": ["Adult", "Violence"] } } }</code></pre>
+      <p>Cloud Vision SafeSearch 的可能性等级会映射为 0–100 的置信度
+      (VERY_UNLIKELY=0 … VERY_LIKELY=100),再与 <code>minConfidence</code>(默认
+      75)比较。任一选中类别命中——类别为 <code>Adult</code>、<code>Violence</code>、
+      <code>Racy</code>、<code>Medical</code>、<code>Spoof</code>,同时兼容
+      <code>"Explicit Nudity"</code>、<code>"Suggestive"</code> 等 Rekognition
+      别名——图片就按给定 sigma 模糊(有效区间 0.3–1000)。省略
+      <code>moderationLabels</code> 表示任意类别命中即生效。</p>
+
+      <h3 id="overlay">叠加水印(overlay)</h3>
+<pre><code>{ "key": "photos/cat.jpg",
+  "edits": {
+    "resize": { "width": 800 },
+    "overlayWith": {
+      "bucket": "my-image-bucket",
+      "key": "brand/logo.png",
+      "alpha": "50",
+      "wRatio": "20",
+      "options": { "left": "-10", "top": "90p" }
+    } } }</code></pre>
+      <ul>
+        <li><code>alpha</code> —— 额外透明度 0–100(越界按 0 处理)。</li>
+        <li><code>wRatio</code>/<code>hRatio</code> —— 把水印缩放到底图的百分比大小。</li>
+        <li><code>options.left/top</code> —— 像素偏移;负值表示从右/下边缘反算;<code>NNp</code> 表示百分比(如 <code>90p</code> = 距顶 90%)。</li>
+        <li>水印叠加失败返回 <code>400 OverlayImageException</code>。</li>
+      </ul>
+
+      <h3 id="round-crop">圆形裁剪(round crop)</h3>
+<pre><code>{ "key": "avatars/user.jpg",
+  "edits": { "resize": { "width": 200, "height": 200, "fit": "cover" },
+             "roundCrop": true } }</code></pre>
+      <p>裁出椭圆(默认取内切圆/椭圆)并裁掉多余边缘。也可以传对象,用
+      <code>rx</code>、<code>ry</code>、<code>top</code>、<code>left</code>
+      控制椭圆。不带透明通道的输出格式(JPEG)外圈会呈黑色——配合
+      <code>"outputFormat": "png"</code> 或 <code>webp</code> 保留透明。</p>
+
+      <h3 id="animated">动图(GIF / WebP)</h3>
+<pre><code>{ "key": "stickers/dance.gif",
+  "edits": { "resize": { "width": 240 } },
+  "outputFormat": "webp" }</code></pre>
+      <p>GIF 源图自动逐帧处理(也可用 <code>"edits": { "animated": true|false }</code>
+      强制指定)。单帧图片自动回落到静态处理。动图会跳过 <code>rotate</code>、
+      <code>smartCrop</code>、<code>roundCrop</code> 与 <code>contentModeration</code>。</p>
+
+      <h3 id="custom-headers">自定义响应头</h3>
+<pre><code>{ "key": "docs/diagram.png",
+  "headers": { "Cache-Control": "max-age=86400,public",
+               "X-Robots-Tag": "noindex" } }</code></pre>
+      <p>响应头先经过拒绝列表过滤(<code>Set-Cookie</code>、<code>Authorization</code> 及
+      <code>x-amz-*</code>/<code>content-*</code> 前缀等安全敏感头会被丢弃),见
+      <a href="api-reference.html#deny-list">API 参考</a>。仅 Default 请求支持自定义响应头。</p>
+
+      <h3 id="expires">限时 URL(expires)</h3>
+<pre><code>https://img.example.com/&lt;base64&gt;?expires=20261231T235959Z&amp;signature=…</code></pre>
+      <p>时间戳为严格的 UTC <code>YYYYMMDDTHHmmssZ</code> 格式。格式错误返回
+      <code>400 ImageRequestExpiryFormat</code>;已过期返回
+      <code>400 ImageRequestExpired</code>。校验通过后响应的 <code>Cache-Control</code>
+      被改写为 <code>max-age=&lt;剩余秒数&gt;,public</code>,确保 CDN 不会缓存超过有效期。请与签名配合使用——否则调用方把参数删掉即可绕过。</p>
+
+      <h2 id="fallback">兜底图(fallback image)</h2>
+      <p>配置 <code>ENABLE_DEFAULT_FALLBACK_IMAGE=Yes</code> 与
+      <code>DEFAULT_FALLBACK_IMAGE_BUCKET/KEY</code> 后,任何处理错误都会返回兜底图而不是错误
+      JSON——<strong>HTTP 状态码仍保留原始错误码</strong>,监控告警不受影响。Cache-Control
+      优先级:兜底对象自带元数据 → 请求 <code>headers</code> →
+      <code>max-age=31536000,public</code>。</p>
+
+      <h2 id="auto-webp">自动 WebP</h2>
+      <p>开启 <code>AUTO_WEBP=Yes</code> 后,<code>Accept</code> 头包含
+      <code>image/webp</code> 的请求自动输出 WebP。优先级:
+      <code>edits.toFormat</code> &gt; AUTO_WEBP &gt; JSON <code>outputFormat</code>。CDN
+      缓存键包含归一化后的 Accept 头,两种变体各自正确缓存。</p>
+
+      <h2 id="demo">到 Demo UI 动手试</h2>
+      <p>部署后的 <a href="../../demo/" rel="noopener">Demo UI</a>
+      可以交互式地拼出本页所有 JSON 并实时给出编码后的 URL。Demo UI
+      仅供评估演示,不适用于生产环境;开启签名的部署不支持 Demo UI。</p>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy the solution — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Deploy the solution</h1>
+      <p>Two deployment paths produce identical infrastructure:</p>
+      <ul>
+        <li><strong>Option 1 — Launch Wizard</strong> (counterpart of the CloudFormation one-click template): an interactive Cloud Shell script that collects parameters and drives Terraform for you.</li>
+        <li><strong>Option 2 — Terraform</strong> (counterpart of the CDK source deployment): call the module directly with your own variable values and state management.</li>
+      </ul>
+
+      <h3>Prerequisites</h3>
+      <ul>
+        <li>A Google Cloud project with billing enabled.</li>
+        <li>Permissions to create Cloud Run services, load balancers, buckets, secrets and service IAM bindings (roughly: Cloud Run Admin, Compute Load Balancer Admin, Storage Admin, Secret Manager Admin, Service Usage Admin).</li>
+        <li>A domain you control if you want a custom hostname (a Google-managed certificate is provisioned by the deployment; you create the DNS <code>A</code> record).</li>
+        <li>One or more existing Cloud Storage buckets containing your source images.</li>
+      </ul>
+
+      <h2 id="wizard">Option 1: Launch Wizard (Open in Cloud Shell)</h2>
+      <ol>
+        <li>Open Cloud Shell in your project (or click the <em>Open in Cloud Shell</em> link from the repository README, which clones the repo automatically).</li>
+        <li>Clone the repository if you opened Cloud Shell manually:
+<pre><code>git clone https://github.com/example/dynamic-image-transformation-gcp.git
+cd dynamic-image-transformation-gcp</code></pre></li>
+        <li>Run the wizard:
+<pre><code>./infra/launch-wizard/launch-wizard.sh</code></pre></li>
+        <li>Answer the prompts — they mirror the CloudFormation parameter table (source buckets, CORS, auto-WebP, signature, fallback image, demo UI, domain, region). Press Enter to accept defaults.</li>
+        <li>Review the generated plan (the wizard runs <code>terraform plan</code> and shows a summary) and confirm to apply.</li>
+        <li>When the wizard finishes it prints the load balancer IP, the API endpoint, and the Demo UI / docs URLs. Create the DNS <code>A</code> record for your domain and wait for the managed certificate to become <code>ACTIVE</code> (typically 15–60 minutes after DNS propagates).</li>
+      </ol>
+      <div class="note"><p>The wizard is a thin front-end over the Terraform module below — re-running it with different answers updates the same deployment, and <code>--destroy</code> tears it down (see <a href="uninstall.html">Uninstall</a>).</p></div>
+
+      <h2 id="terraform">Option 2: Terraform</h2>
+<pre><code>cd infra/terraform
+terraform init
+
+cat &gt; terraform.tfvars &lt;&lt;'EOF'
+project_id     = "my-project"
+region         = "asia-southeast1"
+source_buckets = "my-image-bucket,my-other-bucket"
+domain         = "img.example.com"
+auto_webp      = "Yes"
+EOF
+
+terraform plan
+terraform apply</code></pre>
+
+      <h3 id="variables">Input variables</h3>
+      <p>The variables map one-to-one to the CloudFormation parameters of the AWS solution
+      (names adapted to Terraform conventions). Values <code>Yes</code>/<code>No</code> are kept
+      as strings for parity with the AWS templates.</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>project_id</code></td><td>—&nbsp;(required)</td><td>Target Google Cloud project.</td></tr>
+        <tr><td><code>region</code></td><td><code>asia-southeast1</code></td><td>Region for Cloud Run and solution buckets. The load balancer and CDN are global.</td></tr>
+        <tr><td><code>source_buckets</code></td><td>—&nbsp;(required)</td><td>Comma-separated allow list of source image buckets; the first entry is the default bucket. Sets <code>SOURCE_BUCKETS</code>.</td></tr>
+        <tr><td><code>domain</code></td><td><code>""</code></td><td>Custom hostname for the managed SSL certificate (e.g. <code>img.example.com</code>). Empty = HTTP on the LB IP only (evaluation).</td></tr>
+        <tr><td><code>deploy_demo_ui</code></td><td><code>"Yes"</code></td><td>Deploy the Demo UI bucket and the <code>/demo/*</code> route.</td></tr>
+        <tr><td><code>cors_enabled</code></td><td><code>"No"</code></td><td>Emit CORS headers. Sets <code>CORS_ENABLED</code>.</td></tr>
+        <tr><td><code>cors_origin</code></td><td><code>"*"</code></td><td>Value of <code>Access-Control-Allow-Origin</code> when CORS is enabled. Sets <code>CORS_ORIGIN</code>.</td></tr>
+        <tr><td><code>auto_webp</code></td><td><code>"No"</code></td><td>Serve WebP automatically when the client’s <code>Accept</code> header includes <code>image/webp</code>. Sets <code>AUTO_WEBP</code>.</td></tr>
+        <tr><td><code>enable_signature</code></td><td><code>"No"</code></td><td>Require HMAC-SHA256 URL signatures. Sets <code>ENABLE_SIGNATURE</code>.</td></tr>
+        <tr><td><code>secret_name</code></td><td><code>"dit-signature-secret"</code></td><td>Secret Manager secret holding the signature JSON. Sets <code>SECRETS_MANAGER</code>.</td></tr>
+        <tr><td><code>secret_key</code></td><td><code>""</code></td><td>Key inside the secret JSON whose value is the HMAC secret. Sets <code>SECRET_KEY</code>.</td></tr>
+        <tr><td><code>enable_default_fallback_image</code></td><td><code>"No"</code></td><td>Serve a fallback image instead of an error body when processing fails. Sets <code>ENABLE_DEFAULT_FALLBACK_IMAGE</code>.</td></tr>
+        <tr><td><code>fallback_image_bucket</code></td><td><code>""</code></td><td>Bucket of the fallback image. Sets <code>DEFAULT_FALLBACK_IMAGE_BUCKET</code>.</td></tr>
+        <tr><td><code>fallback_image_key</code></td><td><code>""</code></td><td>Object key of the fallback image. Sets <code>DEFAULT_FALLBACK_IMAGE_KEY</code>.</td></tr>
+        <tr><td><code>rewrite_match_pattern</code></td><td><code>""</code></td><td>Regex for Custom request rewriting. Sets <code>REWRITE_MATCH_PATTERN</code>.</td></tr>
+        <tr><td><code>rewrite_substitution</code></td><td><code>""</code></td><td>Substitution for Custom request rewriting. Sets <code>REWRITE_SUBSTITUTION</code>.</td></tr>
+        <tr><td><code>bucket_map</code></td><td><code>""</code></td><td>GCP-only. Comma-separated <code>s3name=gcsname</code> aliases so legacy <code>s3:&lt;bucket&gt;/</code> URLs resolve to GCS buckets. Sets <code>BUCKET_MAP</code>.</td></tr>
+        <tr><td><code>compat_aws_limits</code></td><td><code>"No"</code></td><td>GCP-only. Reproduce Lambda’s 6&nbsp;MB response limit (<code>413 TooLargeImageException</code>). Sets <code>COMPAT_AWS_LIMITS</code>.</td></tr>
+        <tr><td><code>sharp_size_limit</code></td><td><code>""</code></td><td>Override sharp’s <code>limitInputPixels</code>. Sets <code>SHARP_SIZE_LIMIT</code>.</td></tr>
+        <tr><td><code>log_retention_days</code></td><td><code>30</code></td><td>Cloud Logging retention for the request logs (counterpart of the Lambda log retention parameter).</td></tr>
+      </table>
+      </div>
+
+      <h3 id="outputs">Outputs</h3>
+      <ul>
+        <li><code>lb_ip</code> — global anycast IP; point your domain’s <code>A</code> record here.</li>
+        <li><code>api_url</code> — image API base URL.</li>
+        <li><code>demo_url</code> / <code>docs_url</code> — Demo UI and this guide (when deployed).</li>
+        <li><code>cloud_run_service</code> — the <code>dit-image-handler</code> service name.</li>
+      </ul>
+
+      <h2 id="validate">Validate the deployment</h2>
+<pre><code># 1. Plain fetch through the CDN (replace with your domain and bucket/key)
+REQ='{"bucket":"my-image-bucket","key":"photos/cat.jpg","edits":{"resize":{"width":200}}}'
+curl -o out.jpg "https://img.example.com/$(echo -n "$REQ" | base64 -w0)"
+
+# 2. Second request should be an edge cache hit — look for the Age header
+curl -sI "https://img.example.com/$(echo -n "$REQ" | base64 -w0)" | grep -i -e age -e cache-control</code></pre>
+      <p>The repository also ships <code>deployment/run-e2e-tests.sh</code>, which asserts
+      resize, format conversion, watermarking, smart crop, signatures, fallback, CORS,
+      auto-WebP and CDN cache behavior against a deployed endpoint.</p>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

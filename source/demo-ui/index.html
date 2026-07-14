@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dynamic Image Transformation for Google Cloud CDN — Demo UI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="logo">Dynamic Image Transformation <span class="logo-sub">for Google Cloud CDN</span></span>
+    <span class="topbar-note">Demo UI — not intended for production use; signature-enabled deployments are not supported</span>
+  </div>
+</header>
+
+<main class="container">
+  <!-- ============ Left: source + editor ============ -->
+  <section class="col col-left">
+    <div class="card">
+      <h2>1. Source image</h2>
+      <div class="field-row">
+        <label for="f-bucket">Bucket</label>
+        <input type="text" id="f-bucket" value="helloworld-334009-dit-source" spellcheck="false">
+      </div>
+      <div class="field-row">
+        <label for="f-key">Key</label>
+        <input type="text" id="f-key" placeholder="images/example.jpg" spellcheck="false">
+      </div>
+      <div class="field-row">
+        <button id="btn-import" class="btn btn-primary" type="button">Import</button>
+        <span id="import-status" class="status"></span>
+      </div>
+      <div class="original-preview">
+        <div class="preview-label">Original</div>
+        <div class="img-frame img-frame-sm"><img id="img-original" alt="" hidden></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Editor</h2>
+
+      <h3>Resize</h3>
+      <div class="grid-3">
+        <div class="field">
+          <label for="f-width">Width (px)</label>
+          <input type="number" id="f-width" min="1" placeholder="auto">
+        </div>
+        <div class="field">
+          <label for="f-height">Height (px)</label>
+          <input type="number" id="f-height" min="1" placeholder="auto">
+        </div>
+        <div class="field">
+          <label for="f-fit">Fit</label>
+          <select id="f-fit">
+            <option value="">(default: inside)</option>
+            <option value="cover">cover</option>
+            <option value="contain">contain</option>
+            <option value="fill">fill</option>
+            <option value="inside">inside</option>
+            <option value="outside">outside</option>
+          </select>
+        </div>
+      </div>
+
+      <h3>Format &amp; quality</h3>
+      <div class="grid-3">
+        <div class="field">
+          <label for="f-format">Output format</label>
+          <select id="f-format">
+            <option value="">(keep original)</option>
+            <option value="jpeg">jpeg</option>
+            <option value="png">png</option>
+            <option value="webp">webp</option>
+            <option value="avif">avif</option>
+            <option value="gif">gif</option>
+            <option value="tiff">tiff</option>
+          </select>
+        </div>
+        <div class="field field-span2">
+          <label for="f-quality">Quality <output id="f-quality-out">80</output></label>
+          <input type="range" id="f-quality" min="1" max="100" value="80">
+          <div class="hint">Applied as <code>edits.&lt;format&gt;.quality</code>; requires an output format.</div>
+        </div>
+      </div>
+
+      <h3>Operations</h3>
+      <div class="grid-3">
+        <div class="field">
+          <label for="f-rotate">Rotate</label>
+          <select id="f-rotate">
+            <option value="">none</option>
+            <option value="0">0</option>
+            <option value="90">90</option>
+            <option value="180">180</option>
+            <option value="270">270</option>
+          </select>
+        </div>
+        <div class="field field-span2 checks">
+          <label class="check"><input type="checkbox" id="f-flip"> flip (vertical)</label>
+          <label class="check"><input type="checkbox" id="f-flop"> flop (horizontal)</label>
+          <label class="check"><input type="checkbox" id="f-grayscale"> grayscale</label>
+        </div>
+      </div>
+      <div class="field">
+        <label for="f-blur">Blur (sigma 0.3–1000, 0 = off) <output id="f-blur-out">0</output></label>
+        <input type="range" id="f-blur" min="0" max="100" value="0" step="0.5">
+      </div>
+
+      <h3><label class="check check-h"><input type="checkbox" id="f-smartcrop-on"> Smart crop (Vision face detection)</label></h3>
+      <div class="grid-3 sub" id="grp-smartcrop">
+        <div class="field">
+          <label for="f-faceindex">faceIndex</label>
+          <input type="number" id="f-faceindex" min="0" value="0">
+        </div>
+        <div class="field">
+          <label for="f-padding">padding (px)</label>
+          <input type="number" id="f-padding" min="0" value="0">
+        </div>
+      </div>
+
+      <div class="checks-block">
+        <label class="check"><input type="checkbox" id="f-roundcrop"> Round crop</label>
+        <label class="check"><input type="checkbox" id="f-moderation"> Content moderation (Vision SafeSearch — blurs flagged images)</label>
+      </div>
+
+      <h3><label class="check check-h"><input type="checkbox" id="f-overlay-on"> Overlay (watermark)</label></h3>
+      <div class="sub" id="grp-overlay">
+        <div class="grid-2">
+          <div class="field">
+            <label for="f-ov-bucket">Bucket</label>
+            <input type="text" id="f-ov-bucket" placeholder="(same as source)" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="f-ov-key">Key</label>
+            <input type="text" id="f-ov-key" placeholder="logo.png" spellcheck="false">
+          </div>
+        </div>
+        <div class="grid-3">
+          <div class="field">
+            <label for="f-ov-alpha">alpha (0–100)</label>
+            <input type="number" id="f-ov-alpha" min="0" max="100" placeholder="0">
+          </div>
+          <div class="field">
+            <label for="f-ov-wratio">wRatio (%)</label>
+            <input type="number" id="f-ov-wratio" min="1" max="100" placeholder="auto">
+          </div>
+          <div class="field">
+            <label for="f-ov-hratio">hRatio (%)</label>
+            <input type="number" id="f-ov-hratio" min="1" max="100" placeholder="auto">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="f-ov-left">left (px or <code>NNp</code>)</label>
+            <input type="text" id="f-ov-left" placeholder="e.g. 10 or 5p" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="f-ov-top">top (px or <code>NNp</code>)</label>
+            <input type="text" id="f-ov-top" placeholder="e.g. -10 or 95p" spellcheck="false">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Right: preview ============ -->
+  <section class="col col-right">
+    <div class="card">
+      <h2>3. Preview</h2>
+      <div class="tabs" role="tablist">
+        <button class="tab active" id="tab-default" type="button" role="tab" aria-selected="true">Default (base64 JSON)</button>
+        <button class="tab" id="tab-thumbor" type="button" role="tab" aria-selected="false">Thumbor URL</button>
+      </div>
+
+      <div id="panel-default" role="tabpanel">
+        <div class="preview-label">Request JSON</div>
+        <pre class="codeblock"><code id="out-json">{}</code></pre>
+        <div class="preview-label">Encoded URL</div>
+        <div class="urlbox">
+          <code id="out-url"></code>
+          <button id="btn-copy-url" class="btn btn-ghost" type="button" title="Copy URL">Copy</button>
+        </div>
+      </div>
+
+      <div id="panel-thumbor" role="tabpanel" hidden>
+        <div class="preview-label">Thumbor path <span class="hint-inline">(subset: resize / fit / format / quality / grayscale)</span></div>
+        <div class="urlbox">
+          <code id="out-thumbor-url"></code>
+          <button id="btn-copy-thumbor" class="btn btn-ghost" type="button" title="Copy URL">Copy</button>
+        </div>
+        <div class="hint" id="thumbor-note"></div>
+      </div>
+
+      <div class="preview-actions">
+        <button id="btn-preview" class="btn btn-primary" type="button">Load preview</button>
+        <span id="preview-status" class="status"></span>
+      </div>
+      <div class="img-frame"><img id="img-preview" alt="" hidden></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  Dynamic Image Transformation for Google Cloud CDN — demo application.
+  See the <a href="/docs/">implementation guide</a> for the full API.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

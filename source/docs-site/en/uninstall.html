@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uninstall the solution — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Uninstall the solution</h1>
+      <p>Use the method that matches how you deployed.</p>
+
+      <h2 id="wizard">Launch Wizard deployments</h2>
+<pre><code>./infra/launch-wizard/launch-wizard.sh --destroy</code></pre>
+      <p>The wizard replays the recorded variable values, shows the destruction plan and asks
+      for confirmation before running <code>terraform destroy</code> under the hood.</p>
+
+      <h2 id="terraform">Terraform deployments</h2>
+<pre><code>cd infra/terraform
+terraform destroy</code></pre>
+      <p>Review the plan carefully before confirming.</p>
+
+      <h2 id="whats-removed">What is removed</h2>
+      <ul>
+        <li>Cloud Run service <code>dit-image-handler</code> and its serverless NEG</li>
+        <li>Load balancer <code>dit-lb</code>: forwarding rule, global IP, managed SSL certificate, URL map, backend services and Cloud CDN configuration</li>
+        <li>Solution buckets (<code>…-dit-demo</code>, <code>…-dit-docs</code>, <code>…-dit-logs</code>) and their contents</li>
+        <li>Secret <code>dit-signature-secret</code> (if created by the deployment)</li>
+        <li>Resource-level IAM bindings created by the deployment</li>
+      </ul>
+
+      <h2 id="whats-kept">What is kept</h2>
+      <ul>
+        <li><strong>Your source image buckets</strong> — the deployment never creates or deletes customer data buckets listed in <code>source_buckets</code>.</li>
+        <li>Container images in Artifact Registry (repository <code>dit</code>) — delete manually if unwanted:
+<pre><code>gcloud artifacts repositories delete dit --location=asia-southeast1</code></pre></li>
+        <li>Exported logs already stored in Cloud Logging (subject to retention).</li>
+        <li>Any DNS records you created — remove the <code>A</code> record for the image domain yourself.</li>
+      </ul>
+
+      <div class="warning"><p><strong>Before destroying:</strong> if clients still resolve your
+      image domain to this load balancer, they will start failing immediately. Repoint or remove
+      the DNS record first and let the TTL expire.</p></div>
+
+      <p>If a destroy is interrupted, re-run it — Terraform resumes from recorded state. As a
+      last resort, verify in the console that the resources above (search prefix
+      <code>dit-</code>) are gone.</p>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

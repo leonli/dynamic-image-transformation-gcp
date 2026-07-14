@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API 参考 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>API 参考</h1>
+
+      <h2 id="request-types">请求类型</h2>
+      <p>判定顺序(先匹配先生效):</p>
+      <ol>
+        <li><strong>Default</strong> —— 路径为合法 base64 且解码为 JSON:<code>GET /&lt;base64(JSON)&gt;</code></li>
+        <li><strong>Custom</strong> —— <code>REWRITE_MATCH_PATTERN</code> 与 <code>REWRITE_SUBSTITUTION</code> 均已配置;重写后按 Thumbor 解析</li>
+        <li><strong>Thumbor</strong> —— 路径无扩展名,或以 <code>.jpg .jpeg .png .webp .tiff .tif .svg .gif .avif</code> 结尾</li>
+        <li>否则 → <code>400 RequestTypeError</code></li>
+      </ol>
+
+      <h2 id="schema">Default 请求 schema</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr>
+        <tr><td><code>bucket</code></td><td>string</td><td>否</td><td>源桶。必须在 <code>SOURCE_BUCKETS</code> 白名单内(否则 <code>403 ImageBucket::CannotAccessBucket</code>)。缺省取白名单第一个。</td></tr>
+        <tr><td><code>key</code></td><td>string</td><td>是</td><td>源图对象 key。</td></tr>
+        <tr><td><code>edits</code></td><td>object</td><td>否</td><td>编辑管线(见下)。<code>edits</code> 与 <code>outputFormat</code> 都缺省时返回原始字节。</td></tr>
+        <tr><td><code>outputFormat</code></td><td>string</td><td>否</td><td>取值:<code>jpg jpeg png webp tiff heif heic raw gif avif</code>。</td></tr>
+        <tr><td><code>effort</code></td><td>number</td><td>否</td><td>仅 WebP。截断为整数,有效区间 0–6,越界回落到 4。</td></tr>
+        <tr><td><code>headers</code></td><td>object</td><td>否</td><td>附加响应头,经<a href="#deny-list">拒绝列表</a>过滤。</td></tr>
+      </table>
+      </div>
+
+      <h3 id="edits">支持的 <code>edits</code> 键</h3>
+      <div class="table-scroll">
+      <table>
+        <tr><th>分组</th><th>键</th></tr>
+        <tr><td>通道(Channel)</td><td class="wrap"><code class="wrap">removeAlpha, ensureAlpha, extractChannel, joinChannel, bandbool</code></td></tr>
+        <tr><td>颜色(Color)</td><td class="wrap"><code class="wrap">tint, greyscale, grayscale, pipelineColourspace, pipelineColorspace, toColourspace, toColorspace</code></td></tr>
+        <tr><td>操作(Operation)</td><td class="wrap"><code class="wrap">rotate, flip, flop, affine, sharpen, median, blur, flatten, unflatten, gamma, negate, normalise, normalize, clahe, convolve, threshold, boolean, linear, recomb, modulate</code></td></tr>
+        <tr><td>格式(Format)</td><td class="wrap"><code class="wrap">jpeg, png, webp, gif, avif, tiff, heif, toFormat</code></td></tr>
+        <tr><td>缩放(Resize)</td><td class="wrap"><code class="wrap">resize, extend, extract, trim</code></td></tr>
+        <tr><td>方案特有</td><td class="wrap"><code class="wrap">overlayWith, smartCrop, roundCrop, contentModeration, crop, animated</code></td></tr>
+      </table>
+      </div>
+      <p>管线顺序:先执行 <code>resize</code>(缺省注入 <code>fit=inside</code>),其余 edits
+      按对象键序执行。直通键一一映射到对应的
+      <a href="https://sharp.pixelplumbing.com/" rel="noopener">sharp</a> 调用。</p>
+
+      <h2 id="query">query 参数</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>参数</th><th>作用</th></tr>
+        <tr><td><code>signature</code></td><td>path + 排序后 query 的 HMAC-SHA256(hex),见<a href="use.html#signing">签名</a>。</td></tr>
+        <tr><td><code>expires</code></td><td>UTC <code>YYYYMMDDTHHmmssZ</code>;过期链接被拒绝。</td></tr>
+        <tr><td><code>format</code></td><td>覆盖 <code>toFormat</code>。</td></tr>
+        <tr><td><code>fit</code></td><td>覆盖 <code>resize.fit</code>。</td></tr>
+        <tr><td><code>width</code> / <code>height</code></td><td>覆盖缩放尺寸;<code>0</code> 或空即清空该维度。</td></tr>
+        <tr><td><code>rotate</code></td><td>覆盖旋转角度;空值表示自动转正。</td></tr>
+        <tr><td><code>flip</code> / <code>flop</code></td><td>布尔;<code>"0"</code>、<code>"false"</code>、空串为假。</td></tr>
+        <tr><td><code>grayscale</code> / <code>greyscale</code></td><td>布尔,假值规则同上。</td></tr>
+      </table>
+      </div>
+      <p>其余 query 参数在入口中间件被剔除;重复参数取最后一个值;保留下来的参数按键排序(保证
+      CDN 缓存键稳定)。</p>
+
+      <h2 id="errors">错误码</h2>
+      <p>错误以 JSON 返回:<code>{"status": n, "code": "…", "message": "…"}</code>,
+      <code>Content-Type: application/json</code>,附带 CORS 头;<code>Cache-Control</code> 4xx 为
+      <code>max-age=10,public</code>、5xx 为 <code>max-age=600,public</code>。</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>状态码</th><th>code</th><th>触发场景</th></tr>
+        <tr><td>400</td><td><code>RequestTypeError</code></td><td>路径不匹配任何请求类型(扩展名不受支持)。</td></tr>
+        <tr><td>400</td><td><code>DecodeRequest::CannotDecodeRequest</code></td><td>base64 路径无法解码为合法 JSON。</td></tr>
+        <tr><td>400</td><td><code>DecodeRequest::CannotReadPath</code></td><td>路径为空或不可读。</td></tr>
+        <tr><td>400</td><td><code>QueryParameterParsingError</code></td><td>query 编辑参数解析失败。</td></tr>
+        <tr><td>400</td><td><code>InvalidResizeException</code></td><td>缩放宽/高取整后 ≤ 0。</td></tr>
+        <tr><td>400</td><td><code>Crop::AreaOutOfBounds</code></td><td>手工裁剪区域超出图片范围。</td></tr>
+        <tr><td>400</td><td><code>OverlayImageException</code></td><td>水印/叠加处理失败。</td></tr>
+        <tr><td>400</td><td><code>SmartCrop::FaceIndexOutOfRange</code></td><td><code>faceIndex</code> ≥ 检出的人脸数。</td></tr>
+        <tr><td>400</td><td><code>SmartCrop::PaddingOutOfBounds</code></td><td>padding 使裁剪框超出图片。</td></tr>
+        <tr><td>400</td><td><code>AuthorizationQueryParametersError</code></td><td>要求签名但未携带(“Query-string requires the signature parameter.”)。</td></tr>
+        <tr><td>400</td><td><code>ImageRequestExpiryFormat</code></td><td><code>expires</code> 不符合 <code>YYYYMMDDTHHmmssZ</code>。</td></tr>
+        <tr><td>400</td><td><code>ImageRequestExpired</code></td><td><code>expires</code> 已过期。</td></tr>
+        <tr><td>403</td><td><code>ImageBucket::CannotAccessBucket</code></td><td>请求的桶不在白名单内。</td></tr>
+        <tr><td>403</td><td><code>SignatureDoesNotMatch</code></td><td>签名校验失败。</td></tr>
+        <tr><td>404</td><td><code>NoSuchKey</code></td><td>“The image &lt;key&gt; does not exist or the request may not be base64 encoded properly.” 任何 GCS 读取失败都映射到此错误。</td></tr>
+        <tr><td>413</td><td><code>TooLargeImageException</code></td><td>仅在 <code>COMPAT_AWS_LIMITS=Yes</code> 时:处理结果 base64 编码后超 6&nbsp;MB。</td></tr>
+        <tr><td>500</td><td><code>SignatureValidationFailure</code></td><td>密钥读取失败 / 签名校验过程中出现意外错误。</td></tr>
+        <tr><td>500</td><td><code>SmartCrop::Error</code></td><td>Vision 人脸检测意外失败。</td></tr>
+        <tr><td>500</td><td><code>Rekognition::DetectModerationLabelsError</code></td><td>Vision SafeSearch 调用失败(错误名保留 AWS 命名以兼容)。</td></tr>
+        <tr><td>500</td><td><code>InternalError</code></td><td>“Internal error. Please contact the system administrator.” —— 未归类的其他失败。</td></tr>
+      </table>
+      </div>
+      <p>启用<a href="use.html#fallback">兜底图</a>后,错误响应的响应体是兜底图,但状态码仍保留原错误码。</p>
+
+      <h2 id="headers">响应头</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>响应头</th><th>取值</th></tr>
+        <tr><td><code>Cache-Control</code></td><td>源对象的 <code>Cache-Control</code>,缺省 <code>max-age=31536000,public</code>;会被 <code>expires</code>(剩余秒数)与自定义 <code>headers</code> 覆盖。</td></tr>
+        <tr><td><code>Content-Type</code></td><td>发生格式转换时为 <code>image/&lt;格式&gt;</code>;否则取源对象类型;仍无法确定时按魔数(magic number)推断(PNG/WebP/TIFF/GIF/JPEG/AVIF)。</td></tr>
+        <tr><td><code>Expires</code> / <code>Last-Modified</code></td><td>从源对象元数据透传。</td></tr>
+        <tr><td><code>Access-Control-Allow-Methods</code></td><td><code>GET</code></td></tr>
+        <tr><td><code>Access-Control-Allow-Headers</code></td><td><code>Content-Type, Authorization</code></td></tr>
+        <tr><td><code>Access-Control-Allow-Credentials</code></td><td><code>true</code></td></tr>
+        <tr><td><code>Access-Control-Allow-Origin</code></td><td>仅 <code>CORS_ENABLED=Yes</code> 时输出 <code>CORS_ORIGIN</code> 的值。</td></tr>
+        <tr><td><code>Age</code></td><td>Cloud CDN 缓存命中时附加(排查缓存问题的关键信号)。</td></tr>
+      </table>
+      </div>
+
+      <h3 id="deny-list">响应头拒绝列表</h3>
+      <p>自定义 <code>headers</code> 中命中以下条目(忽略大小写)的会被丢弃:</p>
+      <ul>
+        <li>精确匹配:<code>authorization, connection, server, transfer-encoding, referrer-policy, permissions-policy, www-authenticate, proxy-authenticate, x-api-key, set-cookie</code></li>
+        <li>前缀匹配:<code>x-frame-*, x-content-*, x-xss-*, strict-transport-*, permissions-*, x-amz-*, x-amzn-*, access-control-*, cross-origin-*, content-*</code></li>
+      </ul>
+
+      <h2 id="env">环境变量</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+        <tr><td><code>SOURCE_BUCKETS</code></td><td>—(必填)</td><td>逗号分隔的桶白名单;第一个为默认桶。</td></tr>
+        <tr><td><code>CORS_ENABLED</code></td><td><code>No</code></td><td>是否输出 <code>Access-Control-Allow-Origin</code>。</td></tr>
+        <tr><td><code>CORS_ORIGIN</code></td><td><code>*</code></td><td>CORS origin 取值。</td></tr>
+        <tr><td><code>AUTO_WEBP</code></td><td><code>No</code></td><td>Accept 头允许时自动输出 WebP。</td></tr>
+        <tr><td><code>ENABLE_SIGNATURE</code></td><td><code>No</code></td><td>是否强制 URL 签名。</td></tr>
+        <tr><td><code>SECRETS_MANAGER</code></td><td><code>""</code></td><td>存放签名 JSON 的 Secret Manager 密钥名。</td></tr>
+        <tr><td><code>SECRET_KEY</code></td><td><code>""</code></td><td>密钥 JSON 中的键名。</td></tr>
+        <tr><td><code>ENABLE_DEFAULT_FALLBACK_IMAGE</code></td><td><code>No</code></td><td>处理失败时返回兜底图。</td></tr>
+        <tr><td><code>DEFAULT_FALLBACK_IMAGE_BUCKET</code></td><td><code>""</code></td><td>兜底图所在桶。</td></tr>
+        <tr><td><code>DEFAULT_FALLBACK_IMAGE_KEY</code></td><td><code>""</code></td><td>兜底图对象 key。</td></tr>
+        <tr><td><code>REWRITE_MATCH_PATTERN</code></td><td><code>""</code></td><td>Custom 请求重写正则。</td></tr>
+        <tr><td><code>REWRITE_SUBSTITUTION</code></td><td><code>""</code></td><td>Custom 请求替换串。</td></tr>
+        <tr><td><code>SHARP_SIZE_LIMIT</code></td><td><code>""</code></td><td>覆盖 sharp 的 <code>limitInputPixels</code>。</td></tr>
+        <tr><td><code>BUCKET_MAP</code></td><td><code>""</code></td><td>GCP 独有:<code>s3名=gcs名,…</code> 桶别名映射。</td></tr>
+        <tr><td><code>COMPAT_AWS_LIMITS</code></td><td><code>No</code></td><td>GCP 独有:复刻 6&nbsp;MB → 413 行为。</td></tr>
+        <tr><td><code>PORT</code></td><td><code>8080</code></td><td>GCP 独有:HTTP 监听端口(Cloud Run 约定)。</td></tr>
+        <tr><td><code>GCP_PROJECT</code></td><td>由 ADC 推断</td><td>GCP 独有:Vision / Secret Manager 调用所用项目。</td></tr>
+      </table>
+      </div>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API reference — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>API reference</h1>
+
+      <h2 id="request-types">Request types</h2>
+      <p>Detection order (first match wins):</p>
+      <ol>
+        <li><strong>Default</strong> — path is valid base64 and decodes to JSON: <code>GET /&lt;base64(JSON)&gt;</code></li>
+        <li><strong>Custom</strong> — <code>REWRITE_MATCH_PATTERN</code> and <code>REWRITE_SUBSTITUTION</code> are both set; the rewritten path is parsed as Thumbor</li>
+        <li><strong>Thumbor</strong> — path has no extension or ends in <code>.jpg .jpeg .png .webp .tiff .tif .svg .gif .avif</code></li>
+        <li>otherwise → <code>400 RequestTypeError</code></li>
+      </ol>
+
+      <h2 id="schema">Default request schema</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>bucket</code></td><td>string</td><td>No</td><td>Source bucket. Must be on the <code>SOURCE_BUCKETS</code> allow list (else <code>403 ImageBucket::CannotAccessBucket</code>). Defaults to the first allow-list entry.</td></tr>
+        <tr><td><code>key</code></td><td>string</td><td>Yes</td><td>Object key of the source image.</td></tr>
+        <tr><td><code>edits</code></td><td>object</td><td>No</td><td>Edit pipeline (below). Without <code>edits</code> and <code>outputFormat</code> the original bytes are returned.</td></tr>
+        <tr><td><code>outputFormat</code></td><td>string</td><td>No</td><td>One of <code>jpg jpeg png webp tiff heif heic raw gif avif</code>.</td></tr>
+        <tr><td><code>effort</code></td><td>number</td><td>No</td><td>WebP only. Truncated to an integer; valid 0–6, anything else falls back to 4.</td></tr>
+        <tr><td><code>headers</code></td><td>object</td><td>No</td><td>Extra response headers, filtered by the <a href="#deny-list">header deny list</a>.</td></tr>
+      </table>
+      </div>
+
+      <h3 id="edits">Supported <code>edits</code> keys</h3>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Group</th><th>Keys</th></tr>
+        <tr><td>Channel</td><td class="wrap"><code class="wrap">removeAlpha, ensureAlpha, extractChannel, joinChannel, bandbool</code></td></tr>
+        <tr><td>Color</td><td class="wrap"><code class="wrap">tint, greyscale, grayscale, pipelineColourspace, pipelineColorspace, toColourspace, toColorspace</code></td></tr>
+        <tr><td>Operation</td><td class="wrap"><code class="wrap">rotate, flip, flop, affine, sharpen, median, blur, flatten, unflatten, gamma, negate, normalise, normalize, clahe, convolve, threshold, boolean, linear, recomb, modulate</code></td></tr>
+        <tr><td>Format</td><td class="wrap"><code class="wrap">jpeg, png, webp, gif, avif, tiff, heif, toFormat</code></td></tr>
+        <tr><td>Resize</td><td class="wrap"><code class="wrap">resize, extend, extract, trim</code></td></tr>
+        <tr><td>Solution-specific</td><td class="wrap"><code class="wrap">overlayWith, smartCrop, roundCrop, contentModeration, crop, animated</code></td></tr>
+      </table>
+      </div>
+      <p>Pipeline order: <code>resize</code> is applied first (default <code>fit=inside</code> is
+      injected when absent), then the remaining edits in object key order. Pass-through keys map
+      directly onto the corresponding
+      <a href="https://sharp.pixelplumbing.com/" rel="noopener">sharp</a> calls.</p>
+
+      <h2 id="query">Query parameters</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Parameter</th><th>Effect</th></tr>
+        <tr><td><code>signature</code></td><td>HMAC-SHA256 (hex) of path + sorted query (see <a href="use.html#signing">signing</a>).</td></tr>
+        <tr><td><code>expires</code></td><td>UTC <code>YYYYMMDDTHHmmssZ</code>; expired links are rejected.</td></tr>
+        <tr><td><code>format</code></td><td>Overrides <code>toFormat</code>.</td></tr>
+        <tr><td><code>fit</code></td><td>Overrides <code>resize.fit</code>.</td></tr>
+        <tr><td><code>width</code> / <code>height</code></td><td>Overrides resize dimensions; <code>0</code> or empty clears the dimension.</td></tr>
+        <tr><td><code>rotate</code></td><td>Overrides rotation; empty value means auto-orient.</td></tr>
+        <tr><td><code>flip</code> / <code>flop</code></td><td>Booleans; <code>"0"</code>, <code>"false"</code>, <code>""</code> are false.</td></tr>
+        <tr><td><code>grayscale</code> / <code>greyscale</code></td><td>Boolean, same falsy rules.</td></tr>
+      </table>
+      </div>
+      <p>All other query parameters are stripped at the entry middleware; duplicates keep the
+      last value; the surviving set is sorted by key (stable CDN cache keys).</p>
+
+      <h2 id="errors">Error codes</h2>
+      <p>Errors are returned as JSON: <code>{"status": n, "code": "…", "message": "…"}</code>
+      with <code>Content-Type: application/json</code>, CORS headers, and
+      <code>Cache-Control: max-age=10,public</code> (4xx) or <code>max-age=600,public</code> (5xx).</p>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Status</th><th>Code</th><th>When</th></tr>
+        <tr><td>400</td><td><code>RequestTypeError</code></td><td>Path matches no request type (extension not supported).</td></tr>
+        <tr><td>400</td><td><code>DecodeRequest::CannotDecodeRequest</code></td><td>Base64 path does not decode to valid JSON.</td></tr>
+        <tr><td>400</td><td><code>DecodeRequest::CannotReadPath</code></td><td>Empty or unreadable path.</td></tr>
+        <tr><td>400</td><td><code>QueryParameterParsingError</code></td><td>Query edit parameter could not be parsed.</td></tr>
+        <tr><td>400</td><td><code>InvalidResizeException</code></td><td>Resize width/height ≤ 0 after rounding.</td></tr>
+        <tr><td>400</td><td><code>Crop::AreaOutOfBounds</code></td><td>Manual crop rectangle exceeds the image.</td></tr>
+        <tr><td>400</td><td><code>OverlayImageException</code></td><td>Overlay/watermark could not be applied.</td></tr>
+        <tr><td>400</td><td><code>SmartCrop::FaceIndexOutOfRange</code></td><td><code>faceIndex</code> ≥ number of detected faces.</td></tr>
+        <tr><td>400</td><td><code>SmartCrop::PaddingOutOfBounds</code></td><td>Padding pushes the crop outside the image.</td></tr>
+        <tr><td>400</td><td><code>AuthorizationQueryParametersError</code></td><td>Signature required but missing (“Query-string requires the signature parameter.”).</td></tr>
+        <tr><td>400</td><td><code>ImageRequestExpiryFormat</code></td><td><code>expires</code> is not <code>YYYYMMDDTHHmmssZ</code>.</td></tr>
+        <tr><td>400</td><td><code>ImageRequestExpired</code></td><td><code>expires</code> lies in the past.</td></tr>
+        <tr><td>403</td><td><code>ImageBucket::CannotAccessBucket</code></td><td>Requested bucket is not on the allow list.</td></tr>
+        <tr><td>403</td><td><code>SignatureDoesNotMatch</code></td><td>Signature verification failed.</td></tr>
+        <tr><td>404</td><td><code>NoSuchKey</code></td><td>“The image &lt;key&gt; does not exist or the request may not be base64 encoded properly.” Any GCS read failure maps here.</td></tr>
+        <tr><td>413</td><td><code>TooLargeImageException</code></td><td>Only with <code>COMPAT_AWS_LIMITS=Yes</code>: processed image exceeds 6&nbsp;MB base64-encoded.</td></tr>
+        <tr><td>500</td><td><code>SignatureValidationFailure</code></td><td>Secret could not be read / unexpected signature error.</td></tr>
+        <tr><td>500</td><td><code>SmartCrop::Error</code></td><td>Vision face detection failed unexpectedly.</td></tr>
+        <tr><td>500</td><td><code>Rekognition::DetectModerationLabelsError</code></td><td>Vision SafeSearch call failed (AWS error name kept for compatibility).</td></tr>
+        <tr><td>500</td><td><code>InternalError</code></td><td>“Internal error. Please contact the system administrator.” — any unclassified failure.</td></tr>
+      </table>
+      </div>
+      <p>With the <a href="use.html#fallback">fallback image</a> enabled, error responses carry
+      the fallback image body while keeping the original status code.</p>
+
+      <h2 id="headers">Response headers</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Header</th><th>Value</th></tr>
+        <tr><td><code>Cache-Control</code></td><td>Source object’s <code>Cache-Control</code>, else <code>max-age=31536000,public</code>; overridden by <code>expires</code> (remaining seconds) and by custom <code>headers</code>.</td></tr>
+        <tr><td><code>Content-Type</code></td><td><code>image/&lt;format&gt;</code> when converted; otherwise the source content type, or magic-number sniffing (PNG/WebP/TIFF/GIF/JPEG/AVIF) as a last resort.</td></tr>
+        <tr><td><code>Expires</code> / <code>Last-Modified</code></td><td>Passed through from the source object metadata.</td></tr>
+        <tr><td><code>Access-Control-Allow-Methods</code></td><td><code>GET</code></td></tr>
+        <tr><td><code>Access-Control-Allow-Headers</code></td><td><code>Content-Type, Authorization</code></td></tr>
+        <tr><td><code>Access-Control-Allow-Credentials</code></td><td><code>true</code></td></tr>
+        <tr><td><code>Access-Control-Allow-Origin</code></td><td><code>CORS_ORIGIN</code> value, only when <code>CORS_ENABLED=Yes</code>.</td></tr>
+        <tr><td><code>Age</code></td><td>Added by Cloud CDN on cache hits (useful for cache debugging).</td></tr>
+      </table>
+      </div>
+
+      <h3 id="deny-list">Header deny list</h3>
+      <p>Custom <code>headers</code> entries matching the following (case-insensitive) are dropped:</p>
+      <ul>
+        <li>Exact: <code>authorization, connection, server, transfer-encoding, referrer-policy, permissions-policy, www-authenticate, proxy-authenticate, x-api-key, set-cookie</code></li>
+        <li>Prefixes: <code>x-frame-*, x-content-*, x-xss-*, strict-transport-*, permissions-*, x-amz-*, x-amzn-*, access-control-*, cross-origin-*, content-*</code></li>
+      </ul>
+
+      <h2 id="env">Environment variables</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>SOURCE_BUCKETS</code></td><td>— (required)</td><td>Comma-separated bucket allow list; first entry is the default bucket.</td></tr>
+        <tr><td><code>CORS_ENABLED</code></td><td><code>No</code></td><td>Emit <code>Access-Control-Allow-Origin</code>.</td></tr>
+        <tr><td><code>CORS_ORIGIN</code></td><td><code>*</code></td><td>CORS origin value.</td></tr>
+        <tr><td><code>AUTO_WEBP</code></td><td><code>No</code></td><td>Serve WebP when the Accept header allows it.</td></tr>
+        <tr><td><code>ENABLE_SIGNATURE</code></td><td><code>No</code></td><td>Require URL signatures.</td></tr>
+        <tr><td><code>SECRETS_MANAGER</code></td><td><code>""</code></td><td>Secret Manager secret name holding the signature JSON.</td></tr>
+        <tr><td><code>SECRET_KEY</code></td><td><code>""</code></td><td>Key inside the secret JSON.</td></tr>
+        <tr><td><code>ENABLE_DEFAULT_FALLBACK_IMAGE</code></td><td><code>No</code></td><td>Serve a fallback image on processing errors.</td></tr>
+        <tr><td><code>DEFAULT_FALLBACK_IMAGE_BUCKET</code></td><td><code>""</code></td><td>Fallback image bucket.</td></tr>
+        <tr><td><code>DEFAULT_FALLBACK_IMAGE_KEY</code></td><td><code>""</code></td><td>Fallback image key.</td></tr>
+        <tr><td><code>REWRITE_MATCH_PATTERN</code></td><td><code>""</code></td><td>Custom request rewrite regex.</td></tr>
+        <tr><td><code>REWRITE_SUBSTITUTION</code></td><td><code>""</code></td><td>Custom request substitution.</td></tr>
+        <tr><td><code>SHARP_SIZE_LIMIT</code></td><td><code>""</code></td><td>sharp <code>limitInputPixels</code> override.</td></tr>
+        <tr><td><code>BUCKET_MAP</code></td><td><code>""</code></td><td>GCP-only: <code>s3name=gcsname,…</code> bucket aliases.</td></tr>
+        <tr><td><code>COMPAT_AWS_LIMITS</code></td><td><code>No</code></td><td>GCP-only: reproduce the 6&nbsp;MB → 413 behavior.</td></tr>
+        <tr><td><code>PORT</code></td><td><code>8080</code></td><td>GCP-only: HTTP listen port (Cloud Run contract).</td></tr>
+        <tr><td><code>GCP_PROJECT</code></td><td>ADC-inferred</td><td>GCP-only: project for Vision / Secret Manager calls.</td></tr>
+      </table>
+      </div>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

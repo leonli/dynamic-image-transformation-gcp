@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Use the solution — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Use the solution</h1>
+      <p>The primary request style is a base64-encoded JSON document in the URL path
+      (a <em>Default</em> request). Thumbor-style paths are covered in
+      <a href="thumbor.html">Thumbor compatibility</a>; the full schema and error tables are in
+      the <a href="api-reference.html">API reference</a>.</p>
+
+      <h2 id="default-requests">Build a Default request</h2>
+      <p>Construct a JSON document, base64-encode it, and append it to your endpoint:</p>
+<pre><code>{
+  "bucket": "my-image-bucket",
+  "key": "photos/cat.jpg",
+  "edits": {
+    "resize": { "width": 300, "height": 300, "fit": "cover" }
+  },
+  "outputFormat": "webp"
+}</code></pre>
+<pre><code>https://img.example.com/eyJidWNrZXQiOiJteS1pbWFnZS1idWNrZXQiLCJrZXkiOiJwaG90b3MvY2F0LmpwZyIsImVkaXRzIjp7InJlc2l6ZSI6eyJ3aWR0aCI6MzAwLCJoZWlnaHQiOjMwMCwiZml0IjoiY292ZXIifX0sIm91dHB1dEZvcm1hdCI6IndlYnAifQ==</code></pre>
+      <ul>
+        <li><code>bucket</code> is optional — it defaults to the first entry of <code>SOURCE_BUCKETS</code> and must be on the allow list.</li>
+        <li><code>edits</code> keys are applied in order after <code>resize</code>; most sharp operations pass through directly (see the <a href="api-reference.html#schema">schema</a>).</li>
+        <li>With no <code>edits</code> and no <code>outputFormat</code>, the original object is returned unmodified.</li>
+      </ul>
+
+      <h3 id="signing">Node.js — build and sign a URL</h3>
+<pre><code>const crypto = require("crypto");
+
+const SECRET = process.env.DIT_SECRET;      // value stored in Secret Manager under SECRET_KEY
+const ENDPOINT = "https://img.example.com";
+
+function buildUrl(request, query = {}) {
+  const path = "/" + Buffer.from(JSON.stringify(request)).toString("base64");
+
+  // string-to-sign = path + ("?" + query sorted by key, signature excluded)
+  const qs = Object.keys(query).sort()
+    .map((k) =&gt; `${k}=${query[k]}`).join("&amp;");
+  const stringToSign = qs ? `${path}?${qs}` : path;
+
+  const signature = crypto.createHmac("sha256", SECRET)
+    .update(stringToSign).digest("hex");
+
+  const sep = qs ? "&amp;" : "?";
+  return `${ENDPOINT}${path}${qs ? "?" + qs : ""}${sep}signature=${signature}`;
+}
+
+console.log(buildUrl(
+  { bucket: "my-image-bucket", key: "photos/cat.jpg",
+    edits: { resize: { width: 300, fit: "cover" } } },
+  { expires: "20261231T235959Z" }
+));</code></pre>
+
+      <h3>Python — build and sign a URL</h3>
+<pre><code>import base64, hashlib, hmac, json, os
+
+SECRET = os.environ["DIT_SECRET"].encode()
+ENDPOINT = "https://img.example.com"
+
+def build_url(request: dict, query: dict | None = None) -&gt; str:
+    path = "/" + base64.b64encode(
+        json.dumps(request, separators=(",", ":")).encode()).decode()
+
+    qs = "&amp;".join(f"{k}={v}" for k, v in sorted((query or {}).items()))
+    string_to_sign = f"{path}?{qs}" if qs else path
+
+    signature = hmac.new(SECRET, string_to_sign.encode(), hashlib.sha256).hexdigest()
+    sep = "&amp;" if qs else "?"
+    return f"{ENDPOINT}{path}{'?' + qs if qs else ''}{sep}signature={signature}"
+
+print(build_url(
+    {"bucket": "my-image-bucket", "key": "photos/cat.jpg",
+     "edits": {"resize": {"width": 300, "fit": "cover"}}},
+    {"expires": "20261231T235959Z"},
+))</code></pre>
+      <div class="note"><p>Signing is only enforced when the deployment sets
+      <code>ENABLE_SIGNATURE=Yes</code>. A missing signature returns
+      <code>400 AuthorizationQueryParametersError</code>; a wrong one returns
+      <code>403 SignatureDoesNotMatch</code>. Signatures produced by clients written for the AWS
+      solution verify unchanged.</p></div>
+
+      <h2 id="query-edits">Query parameter edits</h2>
+      <p>These parameters overlay (and override) the edits from the path, for any request type:</p>
+<pre><code>https://img.example.com/&lt;base64&gt;?width=400&amp;height=300&amp;fit=cover&amp;format=webp&amp;grayscale=true</code></pre>
+      <p>Supported: <code>format</code>, <code>fit</code>, <code>width</code>, <code>height</code>,
+      <code>rotate</code>, <code>flip</code>, <code>flop</code>, <code>grayscale</code> /
+      <code>greyscale</code>. A value of <code>0</code> or an empty string clears
+      width/height; <code>"0"</code>, <code>"false"</code> and <code>""</code> are falsy for
+      flip/flop/grayscale. Any other query parameter is dropped at the edge (it never varies the
+      cache key). Parse failures return <code>400 QueryParameterParsingError</code>.</p>
+
+      <h2 id="examples">Common edits</h2>
+      <h3>Resize, format, quality</h3>
+<pre><code>{
+  "key": "photos/cat.jpg",
+  "edits": {
+    "resize": { "width": 800, "fit": "inside" },
+    "jpeg": { "quality": 75 }
+  },
+  "outputFormat": "jpeg"
+}</code></pre>
+      <p><code>fit</code> accepts <code>cover</code>, <code>contain</code>, <code>fill</code>,
+      <code>inside</code> (default), <code>outside</code>. Width/height are rounded; values ≤ 0
+      return <code>400 InvalidResizeException</code>. For WebP output you can add a top-level
+      <code>"effort": 0–6</code> (default 4).</p>
+
+      <h3 id="smart-crop">Smart crop (face detection)</h3>
+<pre><code>{ "key": "people/team.jpg",
+  "edits": { "smartCrop": { "faceIndex": 0, "padding": 40 } } }</code></pre>
+      <p>Cloud Vision FACE_DETECTION finds faces; the crop is the selected face’s bounding box
+      expanded by <code>padding</code> pixels and clamped to the image. Faces are ordered by
+      bounding-box area, largest first, so <code>faceIndex: 0</code> is always the most prominent
+      face. If no face is found the full image is returned. Out-of-range values return
+      <code>400 SmartCrop::FaceIndexOutOfRange</code> or <code>400 SmartCrop::PaddingOutOfBounds</code>.
+      <code>"smartCrop": true</code> is shorthand for the defaults.</p>
+
+      <h3 id="moderation">Content moderation</h3>
+<pre><code>{ "key": "ugc/upload-123.jpg",
+  "edits": { "contentModeration": {
+      "minConfidence": 75, "blur": 50,
+      "moderationLabels": ["Adult", "Violence"] } } }</code></pre>
+      <p>Cloud Vision SafeSearch likelihoods are mapped to a 0–100 confidence
+      (VERY_UNLIKELY=0 … VERY_LIKELY=100) and compared with <code>minConfidence</code>
+      (default 75). If any selected label matches — categories <code>Adult</code>,
+      <code>Violence</code>, <code>Racy</code>, <code>Medical</code>, <code>Spoof</code>;
+      Rekognition aliases like <code>"Explicit Nudity"</code> and <code>"Suggestive"</code> are
+      also accepted — the image is blurred with the given sigma (effective range 0.3–1000).
+      Omit <code>moderationLabels</code> to match any category.</p>
+
+      <h3 id="overlay">Overlay (watermark)</h3>
+<pre><code>{ "key": "photos/cat.jpg",
+  "edits": {
+    "resize": { "width": 800 },
+    "overlayWith": {
+      "bucket": "my-image-bucket",
+      "key": "brand/logo.png",
+      "alpha": "50",
+      "wRatio": "20",
+      "options": { "left": "-10", "top": "90p" }
+    } } }</code></pre>
+      <ul>
+        <li><code>alpha</code> — extra transparency 0–100 (out-of-range values are treated as 0).</li>
+        <li><code>wRatio</code>/<code>hRatio</code> — scale the overlay to a percentage of the base image.</li>
+        <li><code>options.left/top</code> — pixel offsets; negative values measure from the right/bottom edge; <code>NNp</code> means percent (e.g. <code>90p</code> = 90% down).</li>
+        <li>A failed overlay returns <code>400 OverlayImageException</code>.</li>
+      </ul>
+
+      <h3 id="round-crop">Round crop</h3>
+<pre><code>{ "key": "avatars/user.jpg",
+  "edits": { "resize": { "width": 200, "height": 200, "fit": "cover" },
+             "roundCrop": true } }</code></pre>
+      <p>Cuts an ellipse (default: the inscribed circle/ellipse) and trims the result. You can
+      pass an object with <code>rx</code>, <code>ry</code>, <code>top</code>, <code>left</code>
+      to control the ellipse. Output formats without alpha (JPEG) render the outside black —
+      combine with <code>"outputFormat": "png"</code> or <code>webp</code> to keep transparency.</p>
+
+      <h3 id="animated">Animated GIF / WebP</h3>
+<pre><code>{ "key": "stickers/dance.gif",
+  "edits": { "resize": { "width": 240 } },
+  "outputFormat": "webp" }</code></pre>
+      <p>GIF sources are processed frame-by-frame automatically (or force behavior with
+      <code>"edits": { "animated": true|false }</code>). Single-page images fall back to static
+      processing. For animated images, <code>rotate</code>, <code>smartCrop</code>,
+      <code>roundCrop</code> and <code>contentModeration</code> are skipped.</p>
+
+      <h3 id="custom-headers">Custom response headers</h3>
+<pre><code>{ "key": "docs/diagram.png",
+  "headers": { "Cache-Control": "max-age=86400,public",
+               "X-Robots-Tag": "noindex" } }</code></pre>
+      <p>Headers are filtered through a deny list (security-sensitive names such as
+      <code>Set-Cookie</code>, <code>Authorization</code> and <code>x-amz-*</code>/
+      <code>content-*</code> prefixes are dropped) — see the
+      <a href="api-reference.html#deny-list">API reference</a>. Only Default requests support
+      custom headers.</p>
+
+      <h3 id="expires">Expiring URLs</h3>
+<pre><code>https://img.example.com/&lt;base64&gt;?expires=20261231T235959Z&amp;signature=…</code></pre>
+      <p>The timestamp is strict UTC <code>YYYYMMDDTHHmmssZ</code>. Malformed values return
+      <code>400 ImageRequestExpiryFormat</code>; past timestamps return
+      <code>400 ImageRequestExpired</code>. On success the response
+      <code>Cache-Control</code> is rewritten to <code>max-age=&lt;seconds-left&gt;,public</code>
+      so the CDN never serves beyond the expiry. Combine with signatures — otherwise the
+      parameter can simply be removed by the caller.</p>
+
+      <h2 id="fallback">Fallback image</h2>
+      <p>With <code>ENABLE_DEFAULT_FALLBACK_IMAGE=Yes</code> and
+      <code>DEFAULT_FALLBACK_IMAGE_BUCKET/KEY</code> configured, any processing error returns the
+      fallback image instead of an error body — <strong>the HTTP status code still reflects the
+      original error</strong>, so monitoring keeps working. Cache-Control precedence: the
+      fallback object’s own metadata → request <code>headers</code> →
+      <code>max-age=31536000,public</code>.</p>
+
+      <h2 id="auto-webp">Automatic WebP</h2>
+      <p>With <code>AUTO_WEBP=Yes</code>, requests whose <code>Accept</code> header includes
+      <code>image/webp</code> get WebP output. Precedence:
+      <code>edits.toFormat</code> &gt; AUTO_WEBP &gt; JSON <code>outputFormat</code>. The CDN
+      cache key includes the normalized Accept header, so both variants cache correctly.</p>
+
+      <h2 id="demo">Try it in the Demo UI</h2>
+      <p>The deployed <a href="../../demo/" rel="noopener">Demo UI</a> builds these JSON documents
+      interactively and shows the encoded URL for every knob on this page. It is not intended for
+      production use, and signature-enabled deployments are not supported by the demo.</p>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

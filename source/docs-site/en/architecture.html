@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture overview — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Architecture overview</h1>
+
+      <h2 id="components">Components</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Component</th><th>Role</th></tr>
+        <tr><td>Global external Application Load Balancer</td>
+            <td>Single anycast IP with a Google-managed SSL certificate. Routes <code>/demo/*</code> to the Demo UI backend bucket, <code>/docs/*</code> to the documentation backend bucket, and every other path to the image-handler API.</td></tr>
+        <tr><td>Cloud CDN</td>
+            <td>Caches transformed images at Google edge locations. TTLs follow the origin <code>Cache-Control</code> header. The cache key includes the normalized <code>Accept</code> header so WebP and non-WebP clients get separate cache entries. Negative caching: 4xx for 10&nbsp;s, 5xx for 600&nbsp;s.</td></tr>
+        <tr><td>Cloud Run <code>dit-image-handler</code></td>
+            <td>Node.js 22 + sharp (TypeScript) service, 1 vCPU / 1&nbsp;GiB, <code>min-instances=0</code>. Parses the request (Default / Thumbor / Custom), fetches the source object, applies the edit pipeline and returns the image with cache headers.</td></tr>
+        <tr><td>Cloud Storage source buckets</td>
+            <td>Hold the original images. Only buckets listed in <code>SOURCE_BUCKETS</code> may be read; anything else is rejected with <code>403 ImageBucket::CannotAccessBucket</code>.</td></tr>
+        <tr><td>Secret Manager</td>
+            <td>Stores the signature secret as a JSON document; <code>SECRET_KEY</code> selects the JSON key. The HMAC-SHA256 (hex) algorithm is byte-for-byte identical to the AWS solution.</td></tr>
+        <tr><td>Cloud Vision API</td>
+            <td>FACE_DETECTION for <code>smartCrop</code>; SAFE_SEARCH_DETECTION for <code>contentModeration</code>. Counterpart of Amazon Rekognition.</td></tr>
+        <tr><td>Cloud Logging / Monitoring</td>
+            <td>Structured request logs (with request IDs) and an optional operations dashboard.</td></tr>
+      </table>
+      </div>
+
+      <h2 id="request-flow">Request flow</h2>
+      <div class="arch">
+        <div class="arch-row">
+          <div class="arch-box plain">1. Client<small>GET /&lt;base64&gt; or /fit-in/300x300/…</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">2. ALB + Cloud CDN<small>cache hit &rarr; served from edge</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">3. Cloud Run<small>cache miss only</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box plain">4. Normalize<small>Accept &rarr; image/webp | empty<br>query allow list + sort</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box plain">5. Parse &amp; validate<small>request type, signature, expires</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box green">6. GCS get<small>source object</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box plain">7. Edit pipeline<small>sharp: resize &rarr; edits (key order)</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box green">Vision API<small>only for smartCrop / moderation</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box plain">8. Respond<small>image + Cache-Control<br>CDN stores the result</small></div>
+        </div>
+      </div>
+
+      <ol>
+        <li><strong>Client request.</strong> The URL is either a base64-encoded JSON document, a Thumbor-style path, or a custom pattern (see <a href="api-reference.html">API reference</a>).</li>
+        <li><strong>Edge.</strong> The load balancer terminates TLS; Cloud CDN answers directly on a cache hit. On a hit you will see an <code>Age</code> header in the response.</li>
+        <li><strong>Cloud Run.</strong> Cache misses reach the image-handler service through a serverless NEG (network endpoint group). Ingress is restricted to traffic coming through the load balancer.</li>
+        <li><strong>Request normalization</strong> (counterpart of the CloudFront Function): the <code>Accept</code> header is collapsed to <code>image/webp</code> or empty, and the query string is filtered to
+          <code class="wrap">signature, expires, format, fit, width, height, rotate, flip, flop, grayscale</code>, then sorted. This keeps the CDN cache key stable.</li>
+        <li><strong>Validation.</strong> Request type detection, bucket allow list, optional signature verification (Secret Manager) and <code>expires</code> checking. Failures return AWS-compatible error JSON.</li>
+        <li><strong>Source fetch.</strong> The object is read from Cloud Storage. A missing object returns <code>404 NoSuchKey</code>.</li>
+        <li><strong>Transformation.</strong> sharp applies <code>resize</code> first, then the remaining edits in key order. <code>smartCrop</code> and <code>contentModeration</code> call the Vision API. If there are no edits and no output format, the original bytes are returned untouched.</li>
+        <li><strong>Response.</strong> <code>Cache-Control</code> comes from the source object metadata or defaults to <code>max-age=31536000,public</code>; Cloud CDN caches the transformed result so subsequent requests never reach Cloud Run.</li>
+      </ol>
+
+      <h2 id="request-types">Request type detection (order-sensitive)</h2>
+      <ol>
+        <li><strong>Default</strong> — the path matches the base64 regular expression <em>and</em> decodes to JSON: <code>/&lt;base64(JSON)&gt;</code>.</li>
+        <li><strong>Custom</strong> — both <code>REWRITE_MATCH_PATTERN</code> and <code>REWRITE_SUBSTITUTION</code> are configured; the rewritten path is then parsed as Thumbor.</li>
+        <li><strong>Thumbor</strong> — the path has no file extension, or ends in <code>.jpg .jpeg .png .webp .tiff .tif .svg .gif .avif</code>.</li>
+        <li>Anything else — <code>400 RequestTypeError</code>.</li>
+      </ol>
+
+      <h2 id="differences">Differences from the AWS solution</h2>
+      <ul>
+        <li><strong>No 6&nbsp;MB / 29&nbsp;s hard limits.</strong> Cloud Run does not impose Lambda’s response size or API Gateway’s timeout. Set <code>COMPAT_AWS_LIMITS=Yes</code> to reproduce the AWS <code>413 TooLargeImageException</code> behavior exactly.</li>
+        <li><strong>Bucket prefixes.</strong> Thumbor paths accept both <code>s3:&lt;bucket&gt;/</code> (kept for compatibility) and <code>gs:&lt;bucket&gt;/</code>. <code>BUCKET_MAP</code> can alias old S3 bucket names to GCS bucket names.</li>
+        <li><strong>Face ordering.</strong> Vision API does not return faces in Rekognition’s order; faces are sorted by bounding-box area (descending) so <code>faceIndex</code> stays deterministic. Documented behavior, may differ from AWS for multi-face images.</li>
+      </ul>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

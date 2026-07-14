@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案概览 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>方案概览</h1>
+      <p>
+        <strong>Dynamic Image Transformation for Google Cloud CDN</strong> 是一套 serverless
+        图片实时处理方案:通过 URL 即可完成缩放、格式转换、加水印等操作,处理结果由 Cloud CDN
+        缓存在全球边缘节点。本方案是 AWS 解决方案
+        <em>Dynamic Image Transformation for Amazon CloudFront</em> 的 Google Cloud 对标实现——URL
+        格式、请求 JSON schema、Thumbor filter、签名算法、错误码逐一兼容,从 AWS
+        迁移的客户可以原封不动地沿用现有图片 URL。
+      </p>
+
+      <div class="note">
+        <p><strong>正在从 AWS 迁移?</strong>base64 JSON 与 Thumbor 两种 URL 形式、HMAC-SHA256
+        签名、全部错误码,甚至 <code>s3:&lt;bucket&gt;/</code> 路径前缀都继续可用。迁移映射能力详见
+        <a href="thumbor.html">Thumbor 兼容</a>。</p>
+      </div>
+
+      <h2 id="features">核心能力</h2>
+      <div class="card-grid">
+        <div class="card"><h3>实时图片变换</h3>
+          <p>基于 sharp 管线的缩放、裁剪、旋转、翻转、模糊、锐化、格式转换(JPEG/PNG/WebP/AVIF/GIF/TIFF)与质量控制。</p></div>
+        <div class="card"><h3>三种请求形式</h3>
+          <p>base64 编码的 JSON 请求、含 20 个 filter 的 Thumbor 兼容路径、自定义重写规则——语义与 AWS 方案完全一致。</p></div>
+        <div class="card"><h3>智能裁剪与内容审核</h3>
+          <p>由 Cloud Vision API(对标 Amazon Rekognition)提供人脸感知裁剪(smart crop)与基于 SafeSearch 的内容审核。</p></div>
+        <div class="card"><h3>边缘缓存</h3>
+          <p>全球外部应用负载均衡器(Application Load Balancer)前置 Cloud CDN,处理结果全球缓存;缓存键包含 <code>Accept</code> 头以支持自动 WebP。</p></div>
+        <div class="card"><h3>URL 签名</h3>
+          <p>可选的 HMAC-SHA256 请求签名,密钥存于 Secret Manager——与 AWS 部署逐字节兼容。</p></div>
+        <div class="card"><h3>稳健性</h3>
+          <p>处理失败时可返回兜底图(fallback image),源桶白名单、响应头拒绝列表(deny list),错误 JSON 与 AWS 逐字段一致。</p></div>
+      </div>
+
+      <h2 id="use-cases">典型场景</h2>
+      <ul>
+        <li><strong>响应式 Web 分发</strong> —— 一张母图按设备实时生成所需尺寸与格式,支持 WebP 的浏览器自动降流量。</li>
+        <li><strong>电商图库</strong> —— 缩略图、放大图、带水印商品图全部来自同一源对象,并缓存在边缘。</li>
+        <li><strong>用户生成内容(UGC)</strong> —— 用 SafeSearch 审核上传内容,命中即模糊处理后再对外提供。</li>
+        <li><strong>AWS 迁移</strong> —— 图片业务从 CloudFront + Lambda 平移到 Cloud CDN + Cloud Run,客户端 URL 一行不改。</li>
+      </ul>
+
+      <h2 id="architecture">架构一图</h2>
+      <div class="arch">
+        <div class="arch-row">
+          <div class="arch-box plain">用户 / 浏览器</div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">全球外部 ALB<small>anycast IP · 托管 SSL 证书</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">Cloud CDN<small>边缘缓存 · 缓存键含 Accept</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box plain">/demo/* &rarr; Demo UI 桶</div>
+          <div class="arch-box plain">/docs/* &rarr; 文档桶</div>
+          <div class="arch-box">默认路径 &rarr; Cloud Run<small>image-handler(Node.js 22 + sharp)</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box green">Cloud Storage<small>源图桶(白名单)</small></div>
+          <div class="arch-box green">Secret Manager<small>签名密钥</small></div>
+          <div class="arch-box green">Cloud Vision API<small>人脸检测 · SafeSearch</small></div>
+        </div>
+        <div class="arch-caption">全组件 serverless;空闲时 Cloud Run 缩容到零。</div>
+      </div>
+      <p>请求流程详解见<a href="architecture.html">架构概览</a>。</p>
+
+      <h2 id="aws-mapping">AWS 服务映射</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>AWS(v7 Lambda 架构)</th><th>Google Cloud</th></tr>
+        <tr><td>Amazon CloudFront</td><td>Cloud CDN + 全球外部应用负载均衡器</td></tr>
+        <tr><td>CloudFront Function(请求归一化)</td><td>Cloud Run 入口中间件(Accept 头 + query 归一化)</td></tr>
+        <tr><td>API Gateway + AWS Lambda(Node.js + sharp)</td><td>Cloud Run(Node.js 22 + sharp,TypeScript)</td></tr>
+        <tr><td>Amazon S3 源桶</td><td>Cloud Storage 源桶(<code>SOURCE_BUCKETS</code> 白名单)</td></tr>
+        <tr><td>AWS Secrets Manager</td><td>Secret Manager</td></tr>
+        <tr><td>Amazon Rekognition(DetectFaces / DetectModerationLabels)</td><td>Cloud Vision API(FACE_DETECTION / SAFE_SEARCH_DETECTION)</td></tr>
+        <tr><td>Amazon CloudWatch</td><td>Cloud Logging + Cloud Monitoring</td></tr>
+        <tr><td>CloudFormation 一键部署</td><td>Launch Wizard(Open in Cloud Shell,内部驱动 Terraform)</td></tr>
+        <tr><td>CDK 源码部署</td><td>Terraform 模块(<code>infra/terraform/</code>)</td></tr>
+      </table>
+      </div>
+
+      <h2 id="next">下一步</h2>
+      <ol>
+        <li>阅读<a href="architecture.html">架构概览</a>。</li>
+        <li><a href="plan.html">部署规划</a>——成本、安全与配额。</li>
+        <li>用 Launch Wizard 或 Terraform <a href="deploy.html">部署方案</a>。</li>
+        <li><a href="use.html">使用方案</a>,并到 <a href="../../demo/" rel="noopener">Demo UI</a> 动手体验。</li>
+      </ol>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

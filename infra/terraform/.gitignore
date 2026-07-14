@@ -1,0 +1,9 @@
+# Terraform local artifacts
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+# Wizard-generated variable file (contains deployment-specific values)
+wizard.auto.tfvars
+# Plan files
+*.tfplan

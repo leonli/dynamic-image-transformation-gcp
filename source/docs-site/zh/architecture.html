@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>架构概览 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="目录"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>架构概览</h1>
+
+      <h2 id="components">组件构成</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>组件</th><th>职责</th></tr>
+        <tr><td>全球外部应用负载均衡器(Application Load Balancer)</td>
+            <td>单一 anycast IP,挂 Google 托管 SSL 证书。<code>/demo/*</code> 路由到 Demo UI 后端桶,<code>/docs/*</code> 路由到文档后端桶,其余路径全部转发到 image-handler API。</td></tr>
+        <tr><td>Cloud CDN</td>
+            <td>在 Google 边缘节点缓存处理后的图片。TTL 遵循源站 <code>Cache-Control</code>。缓存键包含归一化后的 <code>Accept</code> 头,WebP 与非 WebP 客户端各自独立缓存。负缓存(negative caching):4xx 缓存 10 秒,5xx 缓存 600 秒。</td></tr>
+        <tr><td>Cloud Run <code>dit-image-handler</code></td>
+            <td>Node.js 22 + sharp(TypeScript)服务,1 vCPU / 1&nbsp;GiB,<code>min-instances=0</code>。负责解析请求(Default / Thumbor / Custom)、读取源对象、执行编辑管线并附带缓存头返回图片。</td></tr>
+        <tr><td>Cloud Storage 源图桶</td>
+            <td>存放原图。只有 <code>SOURCE_BUCKETS</code> 白名单内的桶可读,其余一律返回 <code>403 ImageBucket::CannotAccessBucket</code>。</td></tr>
+        <tr><td>Secret Manager</td>
+            <td>以 JSON 文档形式保存签名密钥,<code>SECRET_KEY</code> 指定取哪个键。HMAC-SHA256(hex)算法与 AWS 方案逐字节一致。</td></tr>
+        <tr><td>Cloud Vision API</td>
+            <td>FACE_DETECTION 支撑 <code>smartCrop</code>;SAFE_SEARCH_DETECTION 支撑 <code>contentModeration</code>。对标 Amazon Rekognition。</td></tr>
+        <tr><td>Cloud Logging / Monitoring</td>
+            <td>结构化请求日志(含 request ID)与可选的运维 Dashboard。</td></tr>
+      </table>
+      </div>
+
+      <h2 id="request-flow">请求流程</h2>
+      <div class="arch">
+        <div class="arch-row">
+          <div class="arch-box plain">1. 客户端<small>GET /&lt;base64&gt; 或 /fit-in/300x300/…</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">2. ALB + Cloud CDN<small>缓存命中 &rarr; 边缘直接返回</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box">3. Cloud Run<small>仅缓存未命中时</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box plain">4. 归一化<small>Accept &rarr; image/webp | 空<br>query 白名单 + 排序</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box plain">5. 解析与校验<small>请求类型、签名、expires</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box green">6. 读取 GCS<small>源对象</small></div>
+        </div>
+        <div class="arch-vert">&darr;</div>
+        <div class="arch-row">
+          <div class="arch-box plain">7. 编辑管线<small>sharp:先 resize,再按键序执行 edits</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box green">Vision API<small>仅 smartCrop / 内容审核时调用</small></div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-box plain">8. 响应<small>图片 + Cache-Control<br>CDN 缓存处理结果</small></div>
+        </div>
+      </div>
+
+      <ol>
+        <li><strong>客户端请求。</strong>URL 为 base64 编码的 JSON、Thumbor 风格路径或自定义重写模式三者之一(见 <a href="api-reference.html">API 参考</a>)。</li>
+        <li><strong>边缘层。</strong>负载均衡器终结 TLS;命中缓存时 Cloud CDN 直接应答,响应中会出现 <code>Age</code> 头。</li>
+        <li><strong>Cloud Run。</strong>未命中的请求经 serverless NEG(网络端点组)到达 image-handler。入站流量(ingress)仅限来自负载均衡器。</li>
+        <li><strong>请求归一化</strong>(对标 CloudFront Function):<code>Accept</code> 头收敛为 <code>image/webp</code> 或空;query 只保留
+          <code class="wrap">signature, expires, format, fit, width, height, rotate, flip, flop, grayscale</code>,随后排序,保证 CDN 缓存键稳定。</li>
+        <li><strong>校验。</strong>请求类型判定、桶白名单、可选的签名校验(Secret Manager)与 <code>expires</code> 检查。失败时返回与 AWS 一致的错误 JSON。</li>
+        <li><strong>取源。</strong>从 Cloud Storage 读取对象;对象不存在返回 <code>404 NoSuchKey</code>。</li>
+        <li><strong>图片变换。</strong>sharp 先执行 <code>resize</code>,其余 edits 按键序执行。<code>smartCrop</code> 与 <code>contentModeration</code> 调用 Vision API。若既无 edits 也无 outputFormat,原始字节直接返回,不经过 sharp。</li>
+        <li><strong>响应。</strong><code>Cache-Control</code> 取源对象元数据,缺省为 <code>max-age=31536000,public</code>;Cloud CDN 缓存变换结果,后续请求不再触达 Cloud Run。</li>
+      </ol>
+
+      <h2 id="request-types">请求类型判定(顺序敏感)</h2>
+      <ol>
+        <li><strong>Default</strong> —— 路径符合 base64 正则<em>且</em>能解码为 JSON:<code>/&lt;base64(JSON)&gt;</code>。</li>
+        <li><strong>Custom</strong> —— 同时配置了 <code>REWRITE_MATCH_PATTERN</code> 与 <code>REWRITE_SUBSTITUTION</code>;重写后的路径再按 Thumbor 解析。</li>
+        <li><strong>Thumbor</strong> —— 路径无扩展名,或以 <code>.jpg .jpeg .png .webp .tiff .tif .svg .gif .avif</code> 结尾。</li>
+        <li>其余情况 —— <code>400 RequestTypeError</code>。</li>
+      </ol>
+
+      <h2 id="differences">与 AWS 方案的差异</h2>
+      <ul>
+        <li><strong>没有 6&nbsp;MB / 29 秒硬限制。</strong>Cloud Run 不存在 Lambda 的响应体积限制和 API Gateway 的超时限制。如需精确复刻 AWS 的 <code>413 TooLargeImageException</code> 行为,设 <code>COMPAT_AWS_LIMITS=Yes</code>。</li>
+        <li><strong>桶前缀。</strong>Thumbor 路径同时接受 <code>s3:&lt;bucket&gt;/</code>(兼容保留)与 <code>gs:&lt;bucket&gt;/</code>;<code>BUCKET_MAP</code> 可把旧 S3 桶名映射到 GCS 桶名。</li>
+        <li><strong>人脸排序。</strong>Vision API 不保证与 Rekognition 相同的返回顺序,本方案统一按人脸框(bounding box)面积降序排序,保证 <code>faceIndex</code> 结果确定。多人脸图片上可能与 AWS 结果不同,属已文档化的差异。</li>
+      </ul>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

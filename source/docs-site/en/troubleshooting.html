@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Troubleshooting — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div id="dit-header"></div>
+<div class="dit-shell">
+  <nav id="dit-sidenav" class="dit-sidenav" aria-label="Contents"></nav>
+  <main class="dit-main">
+    <div id="dit-breadcrumb"></div>
+    <article>
+      <h1>Troubleshooting</h1>
+
+      <h2 id="signature-403">403 SignatureDoesNotMatch</h2>
+      <p>The computed HMAC differs from <code>?signature=</code>. Checklist:</p>
+      <ul>
+        <li><strong>String-to-sign</strong> must be the path <em>including the leading slash</em>, plus <code>?</code> and the remaining query parameters <strong>sorted by key</strong> (with <code>signature</code> itself removed). No URL re-encoding in between.</li>
+        <li><strong>JSON byte-identity.</strong> The signature covers the base64 string, so any re-serialization of the JSON (key order, whitespace, <code>separators</code>) produces a different path. Sign the exact string you send.</li>
+        <li><strong>Secret value.</strong> The secret is a JSON document in Secret Manager; the HMAC key is the value at <code>SECRET_KEY</code>, not the whole JSON. Verify with:
+<pre><code>gcloud secrets versions access latest --secret=dit-signature-secret</code></pre></li>
+        <li><strong>Digest format</strong> is lowercase hex, not base64.</li>
+        <li>A missing (rather than wrong) signature returns <code>400 AuthorizationQueryParametersError</code>; a 500 <code>SignatureValidationFailure</code> usually means the service cannot read the secret — check the runtime service account has <code>roles/secretmanager.secretAccessor</code>.</li>
+      </ul>
+
+      <h2 id="nosuchkey">404 NoSuchKey</h2>
+      <p>“The image &lt;key&gt; does not exist or the request may not be base64 encoded properly.”
+      Any GCS read failure maps to this error, so check in order:</p>
+      <ol>
+        <li><strong>Decode your own URL</strong> and inspect the JSON:
+<pre><code>echo 'eyJrZXkiOiJwaG90b3MvY2F0LmpwZyJ9' | base64 -d</code></pre>
+            Truncated or URL-mangled base64 (a stripped trailing <code>=</code>, a <code>+</code> converted to a space by an intermediate system) is the most common cause.</li>
+        <li><strong>Object exists?</strong> <code>gsutil ls gs://my-image-bucket/photos/cat.jpg</code> — keys are case-sensitive and must not start with a slash.</li>
+        <li><strong>Permissions.</strong> The Cloud Run runtime service account needs <code>roles/storage.objectViewer</code> on the source bucket. Permission-denied reads also surface as 404 (by design, to avoid leaking bucket topology).</li>
+        <li><strong>Wrong bucket.</strong> If <code>bucket</code> is omitted, the first entry of <code>SOURCE_BUCKETS</code> is used — confirm it is the one you expect.</li>
+      </ol>
+
+      <h2 id="cdn-miss">CDN cache not hitting</h2>
+      <p>Diagnose with response headers:</p>
+<pre><code>curl -sI "https://img.example.com/&lt;base64&gt;" | grep -i -e age -e cache-control -e etag</code></pre>
+      <ul>
+        <li><strong><code>Age</code> present and increasing</strong> → the response came from the CDN edge cache. <strong>No <code>Age</code></strong> → it was a miss (or the object is not cacheable).</li>
+        <li><strong>Check <code>Cache-Control</code>.</strong> Cloud CDN honors the origin header. If the source object carries <code>Cache-Control: private</code> or <code>no-store</code> metadata, it is passed through and the CDN will not cache — fix the object metadata (<code>gsutil setmeta -h "Cache-Control:max-age=31536000,public" gs://…</code>) or rely on the default <code>max-age=31536000,public</code> by clearing it.</li>
+        <li><strong><code>expires</code> URLs</strong> rewrite <code>Cache-Control</code> to the remaining lifetime — short-lived links cache poorly by design.</li>
+        <li><strong>Unstable URLs.</strong> The cache key is the full URL plus the normalized <code>Accept</code> header. Randomized query parameters are stripped by the normalizer (so they don’t fragment the cache), but differing <em>paths</em> — e.g. JSON with fluctuating key order — create distinct entries. Emit the JSON deterministically.</li>
+        <li><strong>First request after deploy</strong> is always a miss; error responses cache only 10&nbsp;s (4xx) / 600&nbsp;s (5xx).</li>
+      </ul>
+
+      <h2 id="vision">Vision-related errors (smartCrop / contentModeration)</h2>
+      <ul>
+        <li><code>500 SmartCrop::Error</code> or <code>500 Rekognition::DetectModerationLabelsError</code> — the Vision API call failed. Verify the API is enabled (<code>gcloud services enable vision.googleapis.com</code>) and the runtime service account has permission to call it, then check quota (<code>~1,800 requests/min</code> by default).</li>
+        <li><code>400 SmartCrop::FaceIndexOutOfRange</code> — fewer faces were detected than <code>faceIndex</code> expects. Remember faces are ordered by bounding-box area (largest first), which can differ from Rekognition ordering for multi-face images.</li>
+        <li>Moderation seems to “do nothing” — the likelihood mapping is coarse (steps of 25); a <code>minConfidence</code> of 75 requires LIKELY or stronger. Lower it to 50 to also catch POSSIBLE.</li>
+      </ul>
+
+      <h2 id="misc">Other issues</h2>
+      <div class="table-scroll">
+      <table>
+        <tr><th>Symptom</th><th>Likely cause / fix</th></tr>
+        <tr><td><code>403 ImageBucket::CannotAccessBucket</code></td><td>The requested bucket is not in <code>SOURCE_BUCKETS</code>. Add it (Terraform <code>source_buckets</code>) and redeploy; for legacy <code>s3:</code> names configure <code>BUCKET_MAP</code>.</td></tr>
+        <tr><td><code>400 RequestTypeError</code></td><td>Path is neither valid base64 JSON nor a Thumbor path with a supported extension. Check for URL truncation.</td></tr>
+        <tr><td><code>413 TooLargeImageException</code></td><td>Only occurs with <code>COMPAT_AWS_LIMITS=Yes</code>. Turn it off unless you specifically need AWS parity.</td></tr>
+        <tr><td>Certificate stuck in <code>PROVISIONING</code></td><td>The DNS <code>A</code> record does not (yet) point at the load balancer IP. Managed certificates activate only after DNS resolves; allow up to an hour after propagation.</td></tr>
+        <tr><td>Direct <code>*.run.app</code> URL returns 403/404</td><td>Expected: ingress is restricted to the load balancer. Always test through the LB domain.</td></tr>
+        <tr><td>Slow first request after idle</td><td>Cold start with <code>min-instances=0</code>. Set <code>min-instances=1</code> if p99 latency matters more than cost.</td></tr>
+      </table>
+      </div>
+
+      <h2 id="logs">Where to look</h2>
+<pre><code># Request logs (structured, includes requestId and error details)
+gcloud logging read 'resource.type="cloud_run_revision"
+  resource.labels.service_name="dit-image-handler"' --limit=50 --format=json
+
+# CDN cache statistics
+# Console → Network services → Load balancing → dit-lb → Monitoring (cache hit ratio)</code></pre>
+    </article>
+    <div id="dit-pager"></div>
+  </main>
+</div>
+<div id="dit-footer"></div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

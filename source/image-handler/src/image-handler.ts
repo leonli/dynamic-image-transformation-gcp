@@ -33,13 +33,38 @@ export class ImageHandler {
       // Quality-key migration must happen BEFORE the edit loop so the migrated
       // quality option is actually applied (AWS runs fixQuality during setup).
       if (outputFormat) this.fixQuality(request, outputFormat);
-      const animated = this.isAnimated(request);
+      let animated = this.isAnimated(request);
+      // AWS parity: fall back to non-animated processing when the source has a single
+      // page (pages<=1), so edits like rotate are not skipped for still GIFs.
+      if (animated) {
+        const metadata = await sharp(originalImage, { failOnError: false, animated: true }).metadata();
+        if (!metadata.pages || metadata.pages <= 1) animated = false;
+      }
       let image = this.instantiateSharpImage(originalImage, edits ?? {}, animated);
       if (hasEdits) {
         image = await this.applyEdits(image, edits as ImageEdits, animated, request);
       }
       image = this.applyOutputFormat(image, request);
-      output = await image.toBuffer();
+      try {
+        output = await image.toBuffer();
+      } catch (error) {
+        if (error instanceof ImageHandlerError) throw error;
+        // sharp reports some edit failures only when the pipeline runs; map the two
+        // AWS-specified cases onto their 400 error codes here (AWS does the same in
+        // its process() catch block).
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("extract_area: bad extract area")) {
+          throw new ImageHandlerError(
+            StatusCodes.BAD_REQUEST,
+            "Crop::AreaOutOfBounds",
+            "The cropping area you provided exceeds the boundaries of the original image. Please try choosing a correct cropping value."
+          );
+        }
+        if (message.includes("must have same dimensions or smaller")) {
+          throw new ImageHandlerError(StatusCodes.BAD_REQUEST, "BadRequest", message.replace(/composite/gi, "overlay"));
+        }
+        throw error;
+      }
     }
 
     if (process.env.COMPAT_AWS_LIMITS === "Yes" && output.toString("base64").length > AWS_COMPAT_MAX_BASE64_BYTES) {
