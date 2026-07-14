@@ -13,6 +13,24 @@
 
 ---
 
+## 🔗 Try It Live
+
+<p align="center">
+  <a href="https://img.googledemo.com/demo/index.html"><img src="https://img.shields.io/badge/🎛️_Live_Demo_UI-img.googledemo.com%2Fdemo-1a73e8?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Live Demo UI"></a>
+  &nbsp;&nbsp;
+  <a href="https://img.googledemo.com/docs/index.html"><img src="https://img.shields.io/badge/📖_Implementation_Guide-img.googledemo.com%2Fdocs-34a853?style=for-the-badge&logo=googledocs&logoColor=white" alt="Implementation Guide"></a>
+</p>
+
+- **🎛️ Demo UI — [img.googledemo.com/demo](https://img.googledemo.com/demo/index.html)**: point-and-click request builder. Import an image from the source bucket, tune resize/format/quality/AI edits in the editor, and get the live preview together with the exact **request JSON** and **base64-encoded URL** ready to copy into your app.
+- **📖 Implementation Guide — [img.googledemo.com/docs](https://img.googledemo.com/docs/index.html)**: the full bilingual (EN/中文) documentation site in Google Cloud style — architecture, deployment, Thumbor filter reference, API reference and troubleshooting.
+
+<p align="center">
+  <a href="https://img.googledemo.com/demo/index.html"><img src="./docs/images/demo-ui-hero.png" alt="Demo UI — import, edit, preview with generated request JSON and encoded URL" width="920"></a>
+  <br/><em>The Demo UI: source import → editor → live preview, with the generated request JSON and encoded URL.</em>
+</p>
+
+---
+
 ## 🌟 Key Highlights
 
 1. **100% AWS API Compatibility — verified, not claimed.** All three AWS request conventions are implemented from a source-level compatibility specification ([`docs/COMPAT_SPEC.md`](./docs/COMPAT_SPEC.md)) written against the AWS solution's actual code:

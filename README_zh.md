@@ -13,6 +13,24 @@
 
 ---
 
+## 🔗 在线体验
+
+<p align="center">
+  <a href="https://img.googledemo.com/demo/index.html"><img src="https://img.shields.io/badge/🎛️_在线_Demo_UI-img.googledemo.com%2Fdemo-1a73e8?style=for-the-badge&logo=googlechrome&logoColor=white" alt="在线 Demo UI"></a>
+  &nbsp;&nbsp;
+  <a href="https://img.googledemo.com/docs/index.html"><img src="https://img.shields.io/badge/📖_实施指南文档站-img.googledemo.com%2Fdocs-34a853?style=for-the-badge&logo=googledocs&logoColor=white" alt="实施指南文档站"></a>
+</p>
+
+- **🎛️ Demo UI — [img.googledemo.com/demo](https://img.googledemo.com/demo/index.html)**:图形化请求调试器。从源桶导入图片,在编辑器里调 resize/格式/质量/AI 编辑,实时看到处理效果,并同步生成可直接复制进应用的**请求 JSON** 和 **base64 编码 URL**。
+- **📖 实施指南 — [img.googledemo.com/docs](https://img.googledemo.com/docs/index.html)**:中英双语、Google Cloud 官方文档风格的完整文档站——架构、部署、Thumbor 滤镜参考、API 参考与故障排查。
+
+<p align="center">
+  <a href="https://img.googledemo.com/demo/index.html"><img src="./docs/images/demo-ui-hero.png" alt="Demo UI:导入、编辑、实时预览,并生成请求 JSON 与编码 URL" width="920"></a>
+  <br/><em>Demo UI:源图导入 → 编辑器 → 实时预览,同步生成请求 JSON 与编码 URL。</em>
+</p>
+
+---
+
 ## 🌟 核心亮点
 
 1. **100% AWS API 兼容——实测验证,而非口号。** 三种 AWS 请求格式全部按源码级兼容规格([`docs/COMPAT_SPEC.md`](./docs/COMPAT_SPEC.md),逐文件核对 AWS 官方源码)实现:
