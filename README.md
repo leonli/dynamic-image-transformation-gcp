@@ -19,10 +19,13 @@
   <a href="https://img.googledemo.com/demo/index.html"><img src="https://img.shields.io/badge/🎛️_Live_Demo_UI-img.googledemo.com%2Fdemo-1a73e8?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Live Demo UI"></a>
   &nbsp;&nbsp;
   <a href="https://img.googledemo.com/docs/index.html"><img src="https://img.shields.io/badge/📖_Implementation_Guide-img.googledemo.com%2Fdocs-34a853?style=for-the-badge&logo=googledocs&logoColor=white" alt="Implementation Guide"></a>
+  &nbsp;&nbsp;
+  <a href="https://img.googledemo.com/intro/en/index.html"><img src="https://img.shields.io/badge/🎬_Intro_Slides-img.googledemo.com%2Fintro-f9ab00?style=for-the-badge&logo=googleslides&logoColor=white" alt="Intro Slides"></a>
 </p>
 
 - **🎛️ Demo UI — [img.googledemo.com/demo](https://img.googledemo.com/demo/index.html)**: point-and-click request builder. Import an image from the source bucket, tune resize/format/quality/AI edits in the editor, and get the live preview together with the exact **request JSON** and **base64-encoded URL** ready to copy into your app.
 - **📖 Implementation Guide — [img.googledemo.com/docs](https://img.googledemo.com/docs/index.html)**: the full bilingual (EN/中文) documentation site in Google Cloud style — architecture, deployment, Thumbor filter reference, API reference and troubleshooting.
+- **🎬 Intro Slides — [img.googledemo.com/intro](https://img.googledemo.com/intro/index.html)**: a 10-slide bilingual deck that pitches the solution to a mixed business + technical audience — every transform example in it is a real live output of this service.
 
 <p align="center">
   <a href="https://img.googledemo.com/demo/index.html"><img src="./docs/images/demo-ui-hero.png" alt="Demo UI — import, edit, preview with generated request JSON and encoded URL" width="920"></a>

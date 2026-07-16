@@ -19,10 +19,13 @@
   <a href="https://img.googledemo.com/demo/index.html"><img src="https://img.shields.io/badge/🎛️_在线_Demo_UI-img.googledemo.com%2Fdemo-1a73e8?style=for-the-badge&logo=googlechrome&logoColor=white" alt="在线 Demo UI"></a>
   &nbsp;&nbsp;
   <a href="https://img.googledemo.com/docs/index.html"><img src="https://img.shields.io/badge/📖_实施指南文档站-img.googledemo.com%2Fdocs-34a853?style=for-the-badge&logo=googledocs&logoColor=white" alt="实施指南文档站"></a>
+  &nbsp;&nbsp;
+  <a href="https://img.googledemo.com/intro/zh/index.html"><img src="https://img.shields.io/badge/🎬_方案介绍_Slides-img.googledemo.com%2Fintro-f9ab00?style=for-the-badge&logo=googleslides&logoColor=white" alt="方案介绍 Slides"></a>
 </p>
 
 - **🎛️ Demo UI — [img.googledemo.com/demo](https://img.googledemo.com/demo/index.html)**:图形化请求调试器。从源桶导入图片,在编辑器里调 resize/格式/质量/AI 编辑,实时看到处理效果,并同步生成可直接复制进应用的**请求 JSON** 和 **base64 编码 URL**。
 - **📖 实施指南 — [img.googledemo.com/docs](https://img.googledemo.com/docs/index.html)**:中英双语、Google Cloud 官方文档风格的完整文档站——架构、部署、Thumbor 滤镜参考、API 参考与故障排查。
+- **🎬 方案介绍 Slides — [img.googledemo.com/intro](https://img.googledemo.com/intro/index.html)**:中英双语各 10 页,面向业务 + 技术混合受众的图文并茂介绍——deck 里每个转换示例都是本服务线上实时生成的真实输出。
 
 <p align="center">
   <a href="https://img.googledemo.com/demo/index.html"><img src="./docs/images/demo-ui-hero.png" alt="Demo UI:导入、编辑、实时预览,并生成请求 JSON 与编码 URL" width="920"></a>
