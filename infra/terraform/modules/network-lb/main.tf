@@ -121,6 +121,13 @@ resource "google_compute_url_map" "main" {
       paths   = ["/docs", "/docs/*"]
       service = google_compute_backend_bucket.docs.id
     }
+
+    # Intro slide deck lives in the docs bucket under the "intro/" prefix,
+    # so it shares the docs backend (no rewrite: /intro/... -> object intro/...).
+    path_rule {
+      paths   = ["/intro", "/intro/*"]
+      service = google_compute_backend_bucket.docs.id
+    }
   }
 }
 

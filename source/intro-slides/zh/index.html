@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案介绍 — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body>
+<div class="brand"></div>
+<a class="lang-switch" href="../en/index.html" hreflang="en">English</a>
+
+<div class="deck">
+
+  <!-- 1 封面 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="titlemark">Google Cloud 解决方案</div>
+      <h1>一个 URL,<span class="blue">搞定所有图片</span></h1>
+      <p class="lead" style="margin-top:2.6vh">Dynamic Image Transformation for Google Cloud CDN<br>
+      只存一张原图 · URL 里描述想要什么 · 全球边缘缓存秒级返回</p>
+      <div class="badges">
+        <span class="badge"><b>100%</b> 兼容 AWS 同名方案 API</span>
+        <span class="badge"><b>全 Serverless</b> 不用时零成本</span>
+        <span class="badge"><b>AI</b> 人脸智能裁剪 / 内容审核</span>
+        <span class="badge"><b>生产已验证</b> 299 单测 + 7 e2e 全绿</span>
+      </div>
+      <p class="title-url code">img.googledemo.com — 本 deck 所有示例图均由该线上服务实时生成</p>
+    </div>
+  </section>
+
+  <!-- 2 痛点 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>图片,是每个应用都躲不开的"脏活"<span class="en-sub">The image problem every app has</span></h2>
+      <div class="cards">
+        <div class="card">
+          <div class="big">📱💻🖥️</div>
+          <h3>一张图,N 种尺寸</h3>
+          <p>手机 / 平板 / 桌面 / 缩略图 / 2 倍屏……一个商品图动辄要出 十几个版本</p>
+        </div>
+        <div class="card">
+          <div class="big">💾 ×N</div>
+          <h3>预生成 = 存储爆炸</h3>
+          <p>提前切好所有尺寸:存储成本翻 N 倍,改一版设计就要全量重跑,上线被拖慢</p>
+        </div>
+        <div class="card">
+          <div class="big">🐢</div>
+          <h3>新格式跟不上</h3>
+          <p>WebP 省 25–35% 带宽、AVIF 更省,但老图批量转换是个没人想接的工程</p>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:3.6vh">这些活,<span class="blue">不该由人来干</span>。</p>
+    </div>
+  </section>
+
+  <!-- 3 解法 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>解法:把"生成图片"变成"描述图片"<span class="en-sub">URL as the API</span></h2>
+      <div class="urlbox code">
+        <span class="seg-host">img.example.com/</span><span class="seg-size">fit-in/400x300/</span><span class="seg-filter">filters:format(webp)/</span><span class="seg-key">photo.jpg</span>
+      </div>
+      <div class="url-legend">
+        <span><i class="dot" style="background:#1a73e8"></i>要什么尺寸</span>
+        <span><i class="dot" style="background:#188038"></i>要什么效果 / 格式</span>
+        <span><i class="dot" style="background:#d93025"></i>哪张原图</span>
+      </div>
+      <div class="steps">
+        <div class="step"><h3>① 存一张原图</h3><p>只把最高清的那张放进 Cloud Storage,其他什么都不用做</p></div>
+        <div class="step-arrow">→</div>
+        <div class="step"><h3>② URL 描述需求</h3><p>前端 / App 在 URL 里写清尺寸、裁剪、格式、水印,首次请求实时生成</p></div>
+        <div class="step-arrow">→</div>
+        <div class="step"><h3>③ CDN 全球缓存</h3><p>同一 URL 之后的请求由就近边缘节点直接返回,不再重复计算</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 真实效果 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>同一张原图,任意变化<span class="en-sub">以下每张图都是线上服务实时生成的真实输出</span></h2>
+      <div class="gallery" style="grid-template-columns: 1.6fr 1fr 1fr 1fr;">
+        <div class="shot src tall">
+          <img src="../assets/examples/original.jpg" alt="原图">
+          <div class="cap">原图(唯一存储的一张)</div>
+          <div class="url code">landscape.jpg</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/resized.webp" alt="缩放并转 WebP">
+          <div class="cap">缩放 + 转 WebP</div>
+          <div class="url code">/fit-in/280x187/filters:format(webp)/</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/grayscale.jpg" alt="灰度">
+          <div class="cap">灰度</div>
+          <div class="url code">/filters:grayscale()/</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/blur.jpg" alt="模糊">
+          <div class="cap">模糊(占位图 / 防剧透)</div>
+          <div class="url code">/filters:blur(4)/</div>
+        </div>
+      </div>
+      <div class="gallery" style="grid-template-columns: 1.6fr 1fr; width: 62%; margin-left: auto; margin-right: auto;">
+        <div class="shot">
+          <img src="../assets/examples/watermark.jpg" alt="自动水印">
+          <div class="cap">自动加水印(logo 贴右下角)</div>
+          <div class="url code">edits.overlayWith: logo.png</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/portrait-orig.jpg" alt="人像原图">
+          <div class="cap">还能更聪明 → 下一页</div>
+          <div class="url code">face.jpg</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 AI -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>AI 加持:让机器"看懂"图片<span class="en-sub">Cloud Vision 驱动,对标 AWS Rekognition</span></h2>
+      <div class="gallery" style="grid-template-columns: 1fr 1fr 1fr; width: 84%; margin-left:auto; margin-right:auto;">
+        <div class="shot tall src">
+          <img src="../assets/examples/portrait-orig.jpg" alt="人像原图">
+          <div class="cap">原图</div>
+          <div class="url code">face.jpg(AI 生成的虚构人物)</div>
+        </div>
+        <div class="shot tall">
+          <img src="../assets/examples/smartcrop.jpg" alt="人脸智能裁剪">
+          <div class="cap">人脸智能裁剪 smartCrop</div>
+          <div class="url code">/filters:smart_crop(0,60)/</div>
+        </div>
+        <div class="shot tall">
+          <img src="../assets/examples/rounded.png" alt="圆形头像">
+          <div class="cap">一步出圆形头像</div>
+          <div class="url code">edits.roundCrop: true</div>
+        </div>
+      </div>
+      <p class="lead fignote">自动检测人脸位置居中裁剪 —— 商品头图、会员头像、通讯录缩略图不再需要人工框选;<br>
+      同一管道还能做 <b>内容审核</b>(SafeSearch,自动拦截违规图)。</p>
+    </div>
+  </section>
+
+  <!-- 6 Live Demo -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>现在就试:图形化调试台<span class="en-sub">Live Demo — 边调参数边看效果</span></h2>
+      <div class="demo-flex">
+        <div class="shotbig"><img src="../assets/demo-ui-hero.png" alt="Demo UI 截图"></div>
+        <div class="demo-side">
+          <img class="qr" src="../assets/qr-demo.png" alt="Demo 二维码">
+          <p class="small" style="margin-top:1vh">手机扫码直接玩</p>
+          <a class="btn" href="https://img.googledemo.com/demo/index.html" target="_blank" rel="noopener">打开 Live Demo</a>
+          <p class="small" style="margin-top:1.4vh">导入图片 → 拖参数 → 实时预览<br>同步生成可直接复制的请求 JSON 和 URL</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 架构 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>架构:四个全托管服务,零运维<span class="en-sub">Serverless architecture — nothing to patch, nothing to scale</span></h2>
+      <div class="fig"><img src="../assets/arch-zh.svg" alt="方案架构图"></div>
+      <div class="badges">
+        <span class="badge">90%+ 请求 <b>CDN 边缘直接返回</b>,只有未命中才计算</span>
+        <span class="badge">支持 WebP 的浏览器 <b>自动拿 WebP</b>(Vary: Accept)</span>
+        <span class="badge">流量归零时 <b>计算成本归零</b>(min-instances=0)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 AWS 迁移 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>已经在 AWS 上?零改动搬家<span class="en-sub">对标 "Dynamic Image Transformation for Amazon CloudFront"</span></h2>
+      <div class="fig"><img src="../assets/migrate-zh.svg" alt="AWS 到 GCP 迁移切流图"></div>
+      <div class="badges">
+        <span class="badge">URL / 签名算法 / 错误码 <b>逐字段兼容</b>,前端与 App 一行不改</span>
+        <span class="badge"><b>BUCKET_MAP</b> 让 URL 里的老 S3 桶名照常工作</span>
+        <span class="badge"><b>9 阶段零停机</b> runbook:灰度切流,回滚只是一次 DNS 变更</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 成本 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>成本:按用量付费,小场景几乎免费<span class="en-sub">估算基于公开列表价(asia-southeast1),实际以计费为准</span></h2>
+      <table class="cost">
+        <tr><th>规模</th><th>每月图片请求</th><th>估算月成本</th><th>相当于</th></tr>
+        <tr><td>初创 / 中小应用</td><td>1,000 万</td><td class="num">≈ $70 – 95</td><td>每百万张图 ≈ $8</td></tr>
+        <tr><td>成长期电商 / 内容平台</td><td>1.25 亿</td><td class="num">≈ $660 – 970</td><td>每百万张图 ≈ $6</td></tr>
+        <tr><td>大型平台</td><td>5 亿</td><td class="num">≈ $2,600 – 3,800</td><td>每百万张图 ≈ $6</td></tr>
+      </table>
+      <div class="badges">
+        <span class="badge">大头是 <b>CDN 出口带宽</b>,计算只占零头(90% 命中率下)</span>
+        <span class="badge"><b>AUTO_WEBP</b> 一个开关再省 25–35% 带宽</span>
+        <span class="badge">测试环境不跑流量 → <b>月账单接近 $0</b></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 收尾 -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Round Table:您的图片场景怎么搬?</h2>
+      <p class="lead">三个问题,聊聊落地:</p>
+      <p class="lead" style="margin-top:1.2vh">1️⃣ 现在图片的多尺寸/多格式是怎么处理的,花了多少存储和人力?<br>
+      2️⃣ 哪些场景最想先自动化 —— 商品图、头像、UGC 审核?<br>
+      3️⃣ 如果已在用 AWS 同款方案,愿不愿意做一次<b>零改动</b>的搬家演练?</p>
+      <div class="links">
+        <a class="linkcard" href="https://img.googledemo.com/demo/index.html" target="_blank" rel="noopener"><b>🎛️ Live Demo</b><span>img.googledemo.com/demo — 图形化调试台</span></a>
+        <a class="linkcard" href="https://img.googledemo.com/docs/zh/index.html" target="_blank" rel="noopener"><b>📖 实施指南(中英)</b><span>img.googledemo.com/docs — 10 章完整文档</span></a>
+        <a class="linkcard" href="https://img.googledemo.com/docs/zh/migrate.html" target="_blank" rel="noopener"><b>🔁 AWS 迁移指南</b><span>9 阶段零停机方案 + 参数映射表</span></a>
+        <a class="linkcard" href="https://github.com/leonli/dynamic-image-transformation-gcp" target="_blank" rel="noopener"><b>⭐ GitHub 开源仓库</b><span>leonli/dynamic-image-transformation-gcp — Apache 2.0</span></a>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="chrome">
+  <span class="product">Dynamic Image Transformation for Google Cloud CDN — 方案介绍</span>
+  <div class="dots" id="dots"></div>
+  <div class="navbtns">
+    <button id="prev" aria-label="上一页">←</button>
+    <span class="count" id="count">1 / 10</span>
+    <button id="next" aria-label="下一页">→</button>
+  </div>
+</div>
+<script src="../assets/slides.js"></script>
+</body>
+</html>

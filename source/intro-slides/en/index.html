@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solution Intro — Dynamic Image Transformation for Google Cloud CDN</title>
+<link rel="stylesheet" href="../assets/slides.css">
+</head>
+<body>
+<div class="brand"></div>
+<a class="lang-switch" href="../zh/index.html" hreflang="zh">中文</a>
+
+<div class="deck">
+
+  <!-- 1 Title -->
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="titlemark">A Google Cloud Solution</div>
+      <h1>One URL, <span class="blue">every image you need</span></h1>
+      <p class="lead" style="margin-top:2.6vh">Dynamic Image Transformation for Google Cloud CDN<br>
+      Store one original · describe what you want in the URL · served worldwide from edge cache</p>
+      <div class="badges">
+        <span class="badge"><b>100%</b> API-compatible with the AWS solution</span>
+        <span class="badge"><b>Fully serverless</b> — zero cost when idle</span>
+        <span class="badge"><b>AI</b> smart face crop / content moderation</span>
+        <span class="badge"><b>Production-verified</b> — 299 unit + 7 e2e tests green</span>
+      </div>
+      <p class="title-url code">img.googledemo.com — every example in this deck was generated live by that service</p>
+    </div>
+  </section>
+
+  <!-- 2 Pain -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Images: the chore every app is stuck with</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="big">📱💻🖥️</div>
+          <h3>One image, N sizes</h3>
+          <p>Phone / tablet / desktop / thumbnails / retina — a single product photo easily needs a dozen renditions</p>
+        </div>
+        <div class="card">
+          <div class="big">💾 ×N</div>
+          <h3>Pre-generating = storage explosion</h3>
+          <p>Cutting every size ahead of time multiplies storage, and one design tweak means re-processing the entire catalog</p>
+        </div>
+        <div class="card">
+          <div class="big">🐢</div>
+          <h3>New formats lag behind</h3>
+          <p>WebP saves 25–35% bandwidth, AVIF even more — but batch-converting years of images is the project nobody wants</p>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:3.6vh">None of this should be <span class="blue">a human's job</span>.</p>
+    </div>
+  </section>
+
+  <!-- 3 Solution -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>The fix: stop generating images — describe them<span class="en-sub">The URL is the API</span></h2>
+      <div class="urlbox code">
+        <span class="seg-host">img.example.com/</span><span class="seg-size">fit-in/400x300/</span><span class="seg-filter">filters:format(webp)/</span><span class="seg-key">photo.jpg</span>
+      </div>
+      <div class="url-legend">
+        <span><i class="dot" style="background:#1a73e8"></i>the size you want</span>
+        <span><i class="dot" style="background:#188038"></i>the effect / format</span>
+        <span><i class="dot" style="background:#d93025"></i>the original image</span>
+      </div>
+      <div class="steps">
+        <div class="step"><h3>① Store one original</h3><p>Put the highest-quality image in Cloud Storage. That's all you manage.</p></div>
+        <div class="step-arrow">→</div>
+        <div class="step"><h3>② Describe in the URL</h3><p>Your frontend / app spells out size, crop, format, watermark — the first request renders it on the fly</p></div>
+        <div class="step-arrow">→</div>
+        <div class="step"><h3>③ Cached at the edge</h3><p>Every later request for the same URL is served by the nearest CDN edge — no recomputation</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 Real outputs -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>One original, any variation<span class="en-sub">Every image below is a real, live-generated output of the service</span></h2>
+      <div class="gallery" style="grid-template-columns: 1.6fr 1fr 1fr 1fr;">
+        <div class="shot src tall">
+          <img src="../assets/examples/original.jpg" alt="Original">
+          <div class="cap">The original (the only stored file)</div>
+          <div class="url code">landscape.jpg</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/resized.webp" alt="Resized WebP">
+          <div class="cap">Resize + WebP</div>
+          <div class="url code">/fit-in/280x187/filters:format(webp)/</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/grayscale.jpg" alt="Grayscale">
+          <div class="cap">Grayscale</div>
+          <div class="url code">/filters:grayscale()/</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/blur.jpg" alt="Blur">
+          <div class="cap">Blur (placeholders / spoilers)</div>
+          <div class="url code">/filters:blur(4)/</div>
+        </div>
+      </div>
+      <div class="gallery" style="grid-template-columns: 1.6fr 1fr; width: 62%; margin-left: auto; margin-right: auto;">
+        <div class="shot">
+          <img src="../assets/examples/watermark.jpg" alt="Watermark">
+          <div class="cap">Auto watermark (logo, bottom-right)</div>
+          <div class="url code">edits.overlayWith: logo.png</div>
+        </div>
+        <div class="shot">
+          <img src="../assets/examples/portrait-orig.jpg" alt="Portrait">
+          <div class="cap">It gets smarter → next slide</div>
+          <div class="url code">face.jpg</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 AI -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>AI inside: the service “sees” your images<span class="en-sub">Powered by Cloud Vision — the counterpart of AWS Rekognition</span></h2>
+      <div class="gallery" style="grid-template-columns: 1fr 1fr 1fr; width: 84%; margin-left:auto; margin-right:auto;">
+        <div class="shot tall src">
+          <img src="../assets/examples/portrait-orig.jpg" alt="Portrait original">
+          <div class="cap">Original</div>
+          <div class="url code">face.jpg (AI-generated fictional person)</div>
+        </div>
+        <div class="shot tall">
+          <img src="../assets/examples/smartcrop.jpg" alt="Smart crop">
+          <div class="cap">Face-aware smart crop</div>
+          <div class="url code">/filters:smart_crop(0,60)/</div>
+        </div>
+        <div class="shot tall">
+          <img src="../assets/examples/rounded.png" alt="Round avatar">
+          <div class="cap">Round avatar in one call</div>
+          <div class="url code">edits.roundCrop: true</div>
+        </div>
+      </div>
+      <p class="lead fignote">Faces are detected and centered automatically — no more hand-cropping product heroes, member avatars or contact thumbnails.<br>
+      The same pipeline also does <b>content moderation</b> (SafeSearch) to block inappropriate uploads.</p>
+    </div>
+  </section>
+
+  <!-- 6 Live Demo -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Try it right now: the visual playground<span class="en-sub">Live demo — tune parameters, preview instantly</span></h2>
+      <div class="demo-flex">
+        <div class="shotbig"><img src="../assets/demo-ui-hero.png" alt="Demo UI screenshot"></div>
+        <div class="demo-side">
+          <img class="qr" src="../assets/qr-demo.png" alt="Demo QR code">
+          <p class="small" style="margin-top:1vh">Scan to open on your phone</p>
+          <a class="btn" href="https://img.googledemo.com/demo/index.html" target="_blank" rel="noopener">Open Live Demo</a>
+          <p class="small" style="margin-top:1.4vh">Import an image → drag the knobs → live preview,<br>with copy-paste-ready request JSON and encoded URL</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 Architecture -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Architecture: four managed services, zero ops<span class="en-sub">Nothing to patch, nothing to scale</span></h2>
+      <div class="fig"><img src="../assets/arch-en.svg" alt="Solution architecture"></div>
+      <div class="badges">
+        <span class="badge">90%+ of requests <b>served straight from the CDN edge</b> — compute only on miss</span>
+        <span class="badge">WebP-capable browsers <b>get WebP automatically</b> (Vary: Accept)</span>
+        <span class="badge">When traffic is zero, <b>compute cost is zero</b> (min-instances=0)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 AWS migration -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Already on AWS? Move with zero changes<span class="en-sub">Counterpart of “Dynamic Image Transformation for Amazon CloudFront”</span></h2>
+      <div class="fig"><img src="../assets/migrate-en.svg" alt="AWS to GCP migration cutover"></div>
+      <div class="badges">
+        <span class="badge">URLs / signature algorithm / error codes <b>field-for-field compatible</b> — frontends untouched</span>
+        <span class="badge"><b>BUCKET_MAP</b> keeps legacy S3 bucket names in URLs working</span>
+        <span class="badge"><b>9-phase zero-downtime</b> runbook: weighted-DNS canary, rollback = one DNS change</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 Cost -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Cost: pay for what you use — tiny at small scale<span class="en-sub">Estimates from public list prices (asia-southeast1); verify with the pricing calculator</span></h2>
+      <table class="cost">
+        <tr><th>Scale</th><th>Image requests / month</th><th>Estimated monthly cost</th><th>That is…</th></tr>
+        <tr><td>Startup / small app</td><td>10 M</td><td class="num">≈ $70 – 95</td><td>≈ $8 per million images</td></tr>
+        <tr><td>Growing e-commerce / media</td><td>125 M</td><td class="num">≈ $660 – 970</td><td>≈ $6 per million images</td></tr>
+        <tr><td>Large platform</td><td>500 M</td><td class="num">≈ $2,600 – 3,800</td><td>≈ $6 per million images</td></tr>
+      </table>
+      <div class="badges">
+        <span class="badge">The bill is mostly <b>CDN egress</b>; compute is pennies at a 90% hit ratio</span>
+        <span class="badge"><b>AUTO_WEBP</b> is a one-flag 25–35% bandwidth saving</span>
+        <span class="badge">Idle test environments cost <b>close to $0 / month</b></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 Closing -->
+  <section class="slide">
+    <div class="slide-inner">
+      <h2>Round table: what would you move first?</h2>
+      <p class="lead">Three questions to take into the discussion:</p>
+      <p class="lead" style="margin-top:1.2vh">1️⃣ How are image renditions produced today — and what do they cost in storage and people?<br>
+      2️⃣ Which scenario would you automate first — product images, avatars, UGC moderation?<br>
+      3️⃣ If you run the AWS solution today, would you try a <b>zero-change</b> migration rehearsal?</p>
+      <div class="links">
+        <a class="linkcard" href="https://img.googledemo.com/demo/index.html" target="_blank" rel="noopener"><b>🎛️ Live Demo</b><span>img.googledemo.com/demo — visual playground</span></a>
+        <a class="linkcard" href="https://img.googledemo.com/docs/en/index.html" target="_blank" rel="noopener"><b>📖 Implementation Guide (EN/中文)</b><span>img.googledemo.com/docs — full 10-chapter docs</span></a>
+        <a class="linkcard" href="https://img.googledemo.com/docs/en/migrate.html" target="_blank" rel="noopener"><b>🔁 AWS Migration Guide</b><span>9-phase zero-downtime plan + parameter map</span></a>
+        <a class="linkcard" href="https://github.com/leonli/dynamic-image-transformation-gcp" target="_blank" rel="noopener"><b>⭐ GitHub repository</b><span>leonli/dynamic-image-transformation-gcp — Apache 2.0</span></a>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="chrome">
+  <span class="product">Dynamic Image Transformation for Google Cloud CDN — Solution Intro</span>
+  <div class="dots" id="dots"></div>
+  <div class="navbtns">
+    <button id="prev" aria-label="Previous">←</button>
+    <span class="count" id="count">1 / 10</span>
+    <button id="next" aria-label="Next">→</button>
+  </div>
+</div>
+<script src="../assets/slides.js"></script>
+</body>
+</html>
